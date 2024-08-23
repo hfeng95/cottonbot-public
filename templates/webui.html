@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>
+            cottonbot
+        </title>
+        <link rel="stylesheet" href="{{ url_for('static', filename = 'style.css') }}">
+    </head>
+    <body>
+        <h1>cottonbot</h1>
+        <form action="/run_cotton" method="post" id="params-form">
+            <div id="bodypanel">
+                <input type="text" id="in_bot_mode" name="in_bot_mode" placeholder="bot">
+                <input type="text" id="in_gen_mode" name="in_gen_mode" placeholder="gen">
+                <input type="text" id="in_r_author" name="in_r_author" placeholder="target">
+            </div>
+            <div style="text-align:center;">
+                <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken"
+                    cotton-state="torun">awaken</button>
+            </div>
+        </form>
+
+        <script src="https://code.jquery.com/jquery-3.6.1.js" 
+            integrity="sha256-3zlB5s2uwoUzrXK3BT7AX3FyvojsraNFxCc2vC/7pNI=" 
+            crossorigin="anonymous"></script>
+
+        <script type="text/javascript">
+            // handle params submission, run and close cottonbot
+            pf = document.getElementById("params-form");
+            tb = document.getElementById("cotton_state_toggle")
+            pf.addEventListener("submit", function(event){
+                event.preventDefault();
+                if(tb.getAttribute("cotton-state") == "torun"){
+                    $.ajax({ type: "POST", url: "/run_cotton", data: {
+                        in_bot_mode: $("#in_bot_mode").val(), 
+                        in_gen_mode: $("#in_gen_mode").val(), 
+                        in_r_author: $("#in_r_author").val()
+                    }});
+                    tb.innerHTML="kill";
+                    tb.setAttribute("cotton-state", "tonap");
+                } else if(tb.getAttribute("cotton-state") == "tonap"){
+                    $.ajax({ type: "POST", url: "/close_cotton" });
+                    tb.innerHTML="awaken";
+                    tb.setAttribute("cotton-state", "torun");
+                }
+            });
+        </script>
+    </body>
+</html>

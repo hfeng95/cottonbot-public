@@ -1,0 +1,4 @@
+discord
+aitextgen
+Flask
+Flask[async]
