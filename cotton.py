@@ -458,9 +458,19 @@ def set_params(bot, gen, author):
     R_AUTHOR = author
 
 def init_client(client):
+    global BOT_TOKEN, BOT_PREFIX
+
     if client is None:
         intents = discord.Intents.all()
         client = discord.Client(intents = intents)
+
+    # Load the JSON file
+    with open('profile.json', 'r') as file:
+        data = json.load(file)
+
+    # Extract the data into variables
+    BOT_TOKEN = data[0]['token']
+    BOT_PREFIX = data[0]['prefix']
 
     # TODO: run only on first init
     asyncio.run(client.start(BOT_TOKEN))
