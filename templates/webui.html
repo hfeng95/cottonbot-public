@@ -1,49 +1,88 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>
-            cottonbot
-        </title>
-        <link rel="stylesheet" href="{{ url_for('static', filename = 'style.css') }}">
-    </head>
-    <body>
-        <h1>cottonbot</h1>
-        <form action="/run_cotton" method="post" id="params-form">
-            <div id="bodypanel">
-                <input type="text" id="in_bot_mode" name="in_bot_mode" placeholder="bot">
-                <input type="text" id="in_gen_mode" name="in_gen_mode" placeholder="gen">
-                <input type="text" id="in_r_author" name="in_r_author" placeholder="target">
-            </div>
-            <div style="text-align:center;">
-                <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken"
-                    cotton-state="torun">awaken</button>
-            </div>
-        </form>
-
-        <script src="https://code.jquery.com/jquery-3.6.1.js" 
-            integrity="sha256-3zlB5s2uwoUzrXK3BT7AX3FyvojsraNFxCc2vC/7pNI=" 
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>cottonbot control panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.1.min.js"
+            integrity="sha256-3edrmyuQ0w65f8gfBsqowzjJe2iM6n0nKciPUp8y+7E="
             crossorigin="anonymous"></script>
+</head>
+<body>
+    <h1>cottonbot console</h1>
 
-        <script type="text/javascript">
-            // handle params submission, run and close cottonbot
-            pf = document.getElementById("params-form");
-            tb = document.getElementById("cotton_state_toggle")
-            pf.addEventListener("submit", function(event){
-                event.preventDefault();
-                if(tb.getAttribute("cotton-state") == "torun"){
-                    $.ajax({ type: "POST", url: "/run_cotton", data: {
-                        in_bot_mode: $("#in_bot_mode").val(), 
-                        in_gen_mode: $("#in_gen_mode").val(), 
-                        in_r_author: $("#in_r_author").val()
-                    }});
-                    tb.innerHTML="kill";
-                    tb.setAttribute("cotton-state", "tonap");
-                } else if(tb.getAttribute("cotton-state") == "tonap"){
-                    $.ajax({ type: "POST", url: "/close_cotton" });
-                    tb.innerHTML="awaken";
-                    tb.setAttribute("cotton-state", "torun");
+    <form id="params-form">
+        <div id="bodypanel">
+            <label for="in_bot_mode">Bot Mode</label>
+            <select id="in_bot_mode" name="in_bot_mode">
+                <option value="0">Training Mode (learn new patterns)</option>
+                <option value="1" selected>Generation Mode (respond to prompts)</option>
+            </select>
+
+            <label for="in_gen_mode">Generation Style</label>
+            <select id="in_gen_mode" name="in_gen_mode">
+                <option value="0">User-guided (deterministic)</option>
+                <option value="1" selected>Sample-based (creative/randomized)</option>
+            </select>
+
+            <label for="in_r_author">Author</label>
+            <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare">
+        </div>
+        <div style="text-align:center;">
+            <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken" cotton-state="torun">awaken</button>
+        </div>
+    </form>
+
+    <div id="status">
+        <span>Status:</span>
+        <span id="status-text" class="inactive">asleep</span>
+    </div>
+
+    <script>
+        const btn = document.getElementById("cotton_state_toggle");
+        const statusText = document.getElementById("status-text");
+
+        async function refreshStatus() {
+            try {
+                const res = await fetch("/status");
+                const data = await res.json();
+                if (data.is_running) {
+                    statusText.textContent = `awake (author: ${data.r_author})`;
+                    statusText.className = "active";
+                    btn.innerHTML = "slumber";
+                    btn.setAttribute("cotton-state", "tonap");
+                } else {
+                    statusText.textContent = "asleep";
+                    statusText.className = "inactive";
+                    btn.innerHTML = "awaken";
+                    btn.setAttribute("cotton-state", "torun");
                 }
-            });
-        </script>
-    </body>
+            } catch (e) {
+                console.log("Status check failed:", e);
+            }
+        }
+
+        // initial status check
+        refreshStatus();
+        setInterval(refreshStatus, 50000);
+
+        $("#params-form").submit(async function(event) {
+            event.preventDefault();
+            const mode = btn.getAttribute("cotton-state");
+
+            if (mode === "torun") {
+                const data = {
+                    in_bot_mode: $("#in_bot_mode").val(),
+                    in_gen_mode: $("#in_gen_mode").val(),
+                    in_r_author: $("#in_r_author").val()
+                };
+                await $.post("/run_cotton", data);
+                refreshStatus();
+            } else if (mode === "tonap") {
+                await $.post("/close_cotton");
+                refreshStatus();
+            }
+        });
+    </script>
+</body>
 </html>

@@ -2,7 +2,7 @@ html {
     overflow-y: scroll;
 }
 body {
-    background-color: #51585e;
+    background-color: #343638;
 }
 h1 {
     font-family: Arial;
@@ -26,6 +26,19 @@ img {
     display: block;
     max-width: 100%;
     margin: auto;
+}
+label {
+    width: 20%;
+    box-sizing: border-box;
+    min-width: 200px;
+    margin: auto;
+    text-align: center;
+    background: #f7724a;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-family: Helvetica;
+    font-size: 12px;
+    font-weight: bold;
 }
 blockquote {
     display: block;
@@ -80,7 +93,7 @@ input::placeholder {
     font-family: Helvetica;
     font-weight: bold;
     font-size: 16px;
-    color: #424649;
+    color: #343638;
     cursor: pointer;
 }
 .buttonlink:hover {
