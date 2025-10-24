@@ -4,26 +4,29 @@
     <meta charset="UTF-8">
     <title>cottonbot control panel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.1.min.js"
-            integrity="sha256-3edrmyuQ0w65f8gfBsqowzjJe2iM6n0nKciPUp8y+7E="
-            crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-3edrmyuQ0w65f8gfBsqowzjJe2iM6n0nKciPUp8y+7E=" crossorigin="anonymous"></script>
 </head>
 <body>
     <h1>cottonbot console</h1>
 
-    <form id="params-form">
+    <form action="/run_cotton" method="post" id="params-form">
         <div id="bodypanel">
-            <label for="in_bot_mode">Bot Mode</label>
-            <select id="in_bot_mode" name="in_bot_mode">
-                <option value="0">Training Mode (learn new patterns)</option>
-                <option value="1" selected>Generation Mode (respond to prompts)</option>
-            </select>
+            <div class="form-row">
+                <div class="form-label">Bot Mode</div>
+                <select id="in_bot_mode" name="in_bot_mode">
+                    <option value="0">Training</option>
+                    <option value="1" selected>Generation</option>
+                </select>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-label">Generation Mode</div>
+                <select id="in_gen_mode" name="in_gen_mode">
+                    <option value="0">0</option>
+                    <option value="1" selected>1</option>
+                </select>
+            </div>
 
-            <label for="in_gen_mode">Generation Style</label>
-            <select id="in_gen_mode" name="in_gen_mode">
-                <option value="0">User-guided (deterministic)</option>
-                <option value="1" selected>Sample-based (creative/randomized)</option>
-            </select>
 
             <label for="in_r_author">Author</label>
             <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare">
@@ -33,55 +36,67 @@
         </div>
     </form>
 
-    <div id="status">
-        <span>Status:</span>
-        <span id="status-text" class="inactive">asleep</span>
+    <div id="status-indicator">Status: asleep</div>
+
+    <div id="console-log">
+      [System] Awaiting command...
     </div>
 
     <script>
-        const btn = document.getElementById("cotton_state_toggle");
-        const statusText = document.getElementById("status-text");
+        document.addEventListener("DOMContentLoaded", () => {
+            console.log("DOM ready");
+            const pf = document.getElementById("params-form");
+            const tb = document.getElementById("cotton_state_toggle");
+            const logBox = document.getElementById("console-log");
+            const statusText = document.getElementById("status-indicator");
 
-        async function refreshStatus() {
-            try {
-                const res = await fetch("/status");
-                const data = await res.json();
-                if (data.is_running) {
-                    statusText.textContent = `awake (author: ${data.r_author})`;
-                    statusText.className = "active";
-                    btn.innerHTML = "slumber";
-                    btn.setAttribute("cotton-state", "tonap");
+            console.log({pf, tb, logBox, statusText}); // must show DOM nodes, not null
+
+            if (!pf || !tb) {
+                console.error("Missing form/button elements — check IDs and duplicates.");
+                return;
+            }
+
+            function logMessage(msg){
+                const time = new Date().toLocaleTimeString();
+                if (logBox) { logBox.innerHTML += `<br>[${time}] ${msg}`; logBox.scrollTop = logBox.scrollHeight; }
+                else console.log(msg);
+            }
+
+            tb.addEventListener("click", async (e) => {
+                e.preventDefault();
+                if (tb.getAttribute("cotton-state") === "torun") {
+                    console.log("Attempting /run_cotton");
+                    try {
+                        const formData = new URLSearchParams();
+                        formData.append("in_bot_mode", document.getElementById("in_bot_mode").value || "");
+                        formData.append("in_gen_mode", document.getElementById("in_gen_mode").value || "");
+                        formData.append("in_r_author", document.getElementById("in_r_author").value || "");
+                        const res = await fetch("/run_cotton", { method: "POST", body: formData });
+                        const j = await res.json();
+                        logMessage("Awaken response: " + JSON.stringify(j));
+                        tb.innerText = "slumber";
+                        tb.setAttribute("cotton-state", "tonap");
+                        if (statusText) { statusText.textContent = "Status: 🌙 Awake"; }
+                    } catch (err) {
+                        console.error(err);
+                        logMessage("Awaken failed: " + err);
+                    }
                 } else {
-                    statusText.textContent = "asleep";
-                    statusText.className = "inactive";
-                    btn.innerHTML = "awaken";
-                    btn.setAttribute("cotton-state", "torun");
+                    console.log("Attempting /close_cotton");
+                    try {
+                        const res = await fetch("/close_cotton", { method: "POST" });
+                        const j = await res.json();
+                        logMessage("Close response: " + JSON.stringify(j));
+                        tb.innerText = "awaken";
+                        tb.setAttribute("cotton-state", "torun");
+                        if (statusText) { statusText.textContent = "Status: 💤 Asleep"; }
+                    } catch (err) {
+                        console.error(err);
+                        logMessage("Close failed: " + err);
+                    }
                 }
-            } catch (e) {
-                console.log("Status check failed:", e);
-            }
-        }
-
-        // initial status check
-        refreshStatus();
-        setInterval(refreshStatus, 50000);
-
-        $("#params-form").submit(async function(event) {
-            event.preventDefault();
-            const mode = btn.getAttribute("cotton-state");
-
-            if (mode === "torun") {
-                const data = {
-                    in_bot_mode: $("#in_bot_mode").val(),
-                    in_gen_mode: $("#in_gen_mode").val(),
-                    in_r_author: $("#in_r_author").val()
-                };
-                await $.post("/run_cotton", data);
-                refreshStatus();
-            } else if (mode === "tonap") {
-                await $.post("/close_cotton");
-                refreshStatus();
-            }
+            });
         });
     </script>
 </body>

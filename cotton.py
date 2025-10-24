@@ -23,6 +23,7 @@ import random
 import asyncio
 import datetime
 import torch
+import sys
 
 from transformers import (
     AutoTokenizer,
@@ -58,6 +59,8 @@ client = discord.Client(intents=intents)
 cotton_tokenizer = None
 cotton_model = None
 time_last_msg = None
+
+client_loop_ref = None
 
 
 # -------------------------------------------------------------
@@ -296,5 +299,35 @@ async def on_message(message):
             print("Message cooldown active.")
 
 
-if __name__ == "__main__":
+# -------------------------------------------------------------
+# Core
+# -------------------------------------------------------------
+async def client_loop():
+    global client, client_loop_ref
+    client_loop_ref = asyncio.get_running_loop()
+    await client.start(BOT_TOKEN)
+
+def init():
+    global client_loop_ref
+
+    print('cottonbot client starting...')
+
     asyncio.run(client.start(BOT_TOKEN))
+    client_loop_ref = asyncio.get_running_loop()
+
+def main():
+    if len(sys.argv) >= 4:
+        bot_mode = int(sys.argv[1])
+        gen_mode = int(sys.argv[2])
+        r_author = sys.argv[3]
+    else:
+        # Defaults or fallback
+        bot_mode = 1
+        gen_mode = 1
+        r_author = "shakespeare"
+
+    set_params(bot_mode, gen_mode, r_author)
+    init()  # launches client loop, etc.
+
+if __name__ == "__main__":
+    main()
