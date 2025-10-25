@@ -24,6 +24,7 @@ import asyncio
 import datetime
 import torch
 import sys
+import argparse
 
 from transformers import (
     AutoTokenizer,
@@ -46,8 +47,8 @@ LENGTH_LIMIT = 512
 N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
 
-BOT_MODE = 1   # 0 - train, 1 - generate, 2 - auto
-GEN_MODE = 1   # 0 - user mimicry, 1 - sample text recitation
+BOT_MODE = 'speak'   # listen/speak
+GEN_MODE = 'command'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
 
@@ -64,7 +65,7 @@ client_loop_ref = None
 
 
 # -------------------------------------------------------------
-# WebUI
+# Utility
 # -------------------------------------------------------------
 def set_params(bot, gen, author):
     global BOT_MODE, GEN_MODE, R_AUTHOR
@@ -73,8 +74,15 @@ def set_params(bot, gen, author):
     GEN_MODE = gen
     R_AUTHOR = author
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="CottonBot configuration")
+    parser.add_argument("--mode", type=str, default='speak', help="listen/speak")
+    parser.add_argument("--behavior", type=str, default='command', help="command/auto")
+    parser.add_argument("--author", type=str, default="shakespeare", help="target author name")
+    return parser.parse_args()
+
 # -------------------------------------------------------------
-# Utility: Load/Save and fine-tune the model
+# Model functions: Load/Save and fine-tune the model
 # -------------------------------------------------------------
 def load_model(author: str):
     """Load fine-tuned model if exists, else base model."""
@@ -97,7 +105,7 @@ def load_model(author: str):
         print('CUDA not found. Using CPU.')
     return tokenizer, model
 
-
+# training should be done in cotton_train.py
 def fine_tune_model(train_path: str, output_dir: str, steps: int = N_STEPS):
     """Fine-tune GPT model locally using Hugging Face Trainer."""
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
@@ -159,7 +167,7 @@ async def transcribe(guild, channel):
             })
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(msg_data, f, indent=2)
-    print(f"Transcription complete: {len(msg_data)} messages saved.")
+    print(f"Transcription complete: {len(msg_data)} messages saved to {file_path}.")
 
 
 async def find_prompt(channel, num_rows):
@@ -181,7 +189,7 @@ async def find_prompt(channel, num_rows):
     return prefix
 
 
-async def train_model(guild, channel, user):
+async def extract_user_msgs(guild, channel, user):
     print(f"Training on channel {channel.name} for {user.name}")
     file_dir = os.path.join("data", str(guild.id))
     file_path = os.path.join(file_dir, f"{channel.id}.json")
@@ -202,7 +210,7 @@ async def train_model(guild, channel, user):
     with open(o_file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(user_msgs))
 
-    fine_tune_model(o_file_path, os.path.join("checkpoint", str(user.id)), N_STEPS)
+    print(f'Messages from user {user.name} saved to {o_file_path}.')
 
 
 async def generate_text(channel, prompt, author, max_len=100):
@@ -236,9 +244,8 @@ async def on_ready():
     cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
 
     activity_name = {
-        0: "and learnin",
-        1: "suffering" if GEN_MODE == 0 else R_AUTHOR,
-        2: R_AUTHOR
+        'listen': "and learning",
+        'speak': R_AUTHOR
     }[BOT_MODE]
     activity = discord.Activity(
         name=activity_name, type=discord.ActivityType.watching
@@ -262,8 +269,29 @@ async def on_message(message):
 
     if PRIV_MODE and not channel.id == PRIV_ID:
         return
+    
+    if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
+        command = content[len(BOT_PREFIX):].split()
+        if not command:
+            return
+        cmd = command[0].lower()
 
-    if BOT_MODE in (0, 1) and content.lower().startswith(BOT_PREFIX):
+        print('Command read:',cmd)
+
+        if cmd == "learn":
+            await transcribe(guild, channel)
+            if len(command) > 1:
+                # if name is specified, extract messages from the user
+                user_name = command[1]
+                user = discord.utils.find(lambda m: m.name.lower() == user_name.lower(), guild.members)
+                if user:
+                    await extract_user_msgs(guild, channel, user)
+                else:
+                    await channel.send("User not found!")
+
+    elif BOT_MODE == 'speak' and GEN_MODE == 'command':
+        if not content.lower().startswith(BOT_PREFIX):
+            return
         command = content[len(BOT_PREFIX):].split()
         if not command:
             return
@@ -272,16 +300,7 @@ async def on_message(message):
 
         print('Command read:',cmd)
 
-        if cmd == "learn":
-            await transcribe(guild, channel)
-        elif cmd == "train" and len(command) > 1:
-            user_name = command[1]
-            user = discord.utils.find(lambda m: m.name.lower() == user_name.lower(), guild.members)
-            if user:
-                await train_model(guild, channel, user)
-            else:
-                await channel.send("User not found!")
-        elif cmd == "speak":
+        if cmd == "speak":
             prefix = await find_prompt(channel, CONTEXT_LIMIT)
             try:
                 max_len = int(command[1])
@@ -290,11 +309,12 @@ async def on_message(message):
             async with channel.typing():
                 await generate_text(channel, prefix, R_AUTHOR, max_len=max_len)
 
-    elif BOT_MODE == 2:
+    elif BOT_MODE == 'speak' and GEN_MODE == 'auto':
         if time_last_msg is None or message.created_at - time_last_msg > datetime.timedelta(seconds=TIME_MIN_REPLY):
             time_last_msg = message.created_at
             prefix = await find_prompt(channel, 1)
-            await generate_text(channel, prefix, R_AUTHOR, max_len=100)
+            async with channel.typing():
+                await generate_text(channel, prefix, R_AUTHOR, max_len=100)
         else:
             print("Message cooldown active.")
 
@@ -315,19 +335,14 @@ def init():
     asyncio.run(client.start(BOT_TOKEN))
     client_loop_ref = asyncio.get_running_loop()
 
-def main():
-    if len(sys.argv) >= 4:
-        bot_mode = int(sys.argv[1])
-        gen_mode = int(sys.argv[2])
-        r_author = sys.argv[3]
-    else:
-        # Defaults or fallback
-        bot_mode = 1
-        gen_mode = 1
-        r_author = "shakespeare"
+def main(args):
+    bot_mode = args.mode
+    gen_mode = args.behavior
+    r_author = args.author
 
     set_params(bot_mode, gen_mode, r_author)
     init()  # launches client loop, etc.
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

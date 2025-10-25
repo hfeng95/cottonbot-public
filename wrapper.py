@@ -6,8 +6,8 @@ import os
 app = Flask(__name__)
 
 settings = {
-    "bot_mode": 1,    # 0 - train, 1 - generate
-    "gen_mode": 1,    # 0 - user, 1 - sample
+    "bot_mode": 'speak',
+    "gen_mode": 'command',
     "r_author": "shakespeare",
     "is_running": False,
 }
@@ -25,8 +25,12 @@ def run_cotton():
     global bot_process
     data = request.form or request.json or {}
     try:
-        settings["bot_mode"] = int(data.get("in_bot_mode", settings["bot_mode"]))
-        settings["gen_mode"] = int(data.get("in_gen_mode", settings["gen_mode"]))
+        bot_mode = data.get("in_bot_mode", "").strip()
+        if bot_mode:
+            settings["bot_mode"] = bot_mode
+        gen_mode = data.get("in_gen_mode", "").strip()
+        if gen_mode:
+            settings["gen_mode"] = gen_mode
         r_author = data.get("in_r_author", "").strip()
         if r_author:
             settings["r_author"] = r_author
@@ -40,9 +44,9 @@ def run_cotton():
     cmd = [
         "python",
         "cotton.py",
-        str(settings["bot_mode"]),
-        str(settings["gen_mode"]),
-        settings["r_author"],
+        "--mode", settings["bot_mode"],
+        "--behavior", settings["gen_mode"],
+        "--author", settings["r_author"],
     ]
 
     bot_process = subprocess.Popen(
