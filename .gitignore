@@ -1,0 +1,6 @@
+sample/
+data/
+checkpoint/
+aitextgen/
+__pycache__/
+config.json

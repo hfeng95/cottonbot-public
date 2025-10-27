@@ -2,7 +2,7 @@ html {
     overflow-y: scroll;
 }
 body {
-    background-color: #51585e;
+    background-color: #343638;
 }
 h1 {
     font-family: Arial;
@@ -26,6 +26,19 @@ img {
     display: block;
     max-width: 100%;
     margin: auto;
+}
+label {
+    width: 20%;
+    box-sizing: border-box;
+    min-width: 200px;
+    margin: auto;
+    text-align: center;
+    background: #f7724a;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-family: Helvetica;
+    font-size: 12px;
+    font-weight: bold;
 }
 blockquote {
     display: block;
@@ -65,6 +78,29 @@ input::placeholder {
     font-family: Helvetica;
     font-size: 16px;
 }
+#status-indicator {
+    bottom: 235px;
+    text-align: left;
+    color: #f7724a;
+    font-family: Helvetica;
+    font-weight: bold;
+}
+#console-log {
+    bottom: 10px;
+  background-color: #111;
+  text-align: left;
+  color: #0f0;
+  font-family: monospace;
+  padding: 10px;
+  border-radius: 10px 10px 0 0;
+  height: 200px;
+  overflow-y: auto;
+}
+#status-indicator, #console-log {
+  position: fixed;
+  width: 100%;
+  z-index: -10;
+}
 .buttonlink {
     width: 20%;
     box-sizing: border-box;
@@ -80,7 +116,7 @@ input::placeholder {
     font-family: Helvetica;
     font-weight: bold;
     font-size: 16px;
-    color: #424649;
+    color: #343638;
     cursor: pointer;
 }
 .buttonlink:hover {
@@ -102,4 +138,32 @@ input::placeholder {
 .buttonlinkfoot:hover {
     background-color: #dbd1c1;
     transition: 0.3s;
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  margin-bottom: 1em;
+    width: 100%;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.form-label {
+    width: 50%;
+    margin: auto;
+    text-align: left;
+    font-family: Helvetica;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.form-row select {
+    width: 50%;
+  padding: 0.3em 0.5em;
+  border-radius: 5px;
+  border: 1px solid #555;
+  background-color: #222;
+  color: #fff;
 }
