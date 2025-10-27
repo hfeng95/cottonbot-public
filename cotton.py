@@ -5,17 +5,6 @@
 # Supports local fine-tuning and message generation
 #=========================================================
 
-<<<<<<< HEAD
-# TODO: 
-#   - implement command line args, esp for training
-#   - fix formatting of output
-#   - update to new discord command format
-#   - migrate to aitextgen (partial)
-#   - add generation from prompt (partial, auto reply)
-#   - merge speak and recite
-
-=======
->>>>>>> bb41b28 (Revamp to use huggingface transformers directly)
 import discord
 import os
 import json
