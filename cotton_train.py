@@ -51,7 +51,7 @@ def fine_tune(train_path, output_dir, base_model="gpt2", steps=100, epochs=1, ba
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
         save_steps=max(1, steps // 10),
-        save_total_limit=2,
+        save_total_limit=1,
         logging_dir="./logs",
         max_steps=steps,
         logging_steps=10,

@@ -11,6 +11,11 @@ You need a Discord bot token to host cottonbot. You can find information
 about that [here](https://discord.com/developers/docs/intro).
 
 ## Usage
+Activate the conda environment with:
+```
+conda activate cottonbot
+```
+
 The core functionalities of cottonbot are user/channel-specific,
 so cottonbot must be present on the server where the user/channel
 is active.

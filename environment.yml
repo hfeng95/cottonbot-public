@@ -14,3 +14,8 @@ dependencies:
       - torchmetrics==0.11.4
       - transformers==4.57.0
       - accelerate==1.10.1
+      - langchain==0.3
+      - langchain-huggingface==0.3
+      - langchain-community==0.3
+      - faiss-cpu==1.12.0
+      - sentence-transformers==5.1.2
