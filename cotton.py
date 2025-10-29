@@ -14,7 +14,7 @@ import datetime
 import torch
 import sys
 import argparse
-
+from memory_manager import CottonMemory
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -41,7 +41,7 @@ GEN_MODE = 'command'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
 
-TIME_MIN_REPLY = 24
+TIME_MIN_REPLY = 8
 
 intents = discord.Intents.all()
 client = discord.Client(intents=intents)
@@ -51,6 +51,8 @@ cotton_model = None
 time_last_msg = None
 
 client_loop_ref = None
+
+memory = None
 
 
 # -------------------------------------------------------------
@@ -94,7 +96,7 @@ def load_model(author: str):
         print('CUDA not found. Using CPU.')
     return tokenizer, model
 
-# training should be done in cotton_train.py
+# DEPRECATED: training should be done in cotton_train.py
 def fine_tune_model(train_path: str, output_dir: str, steps: int = N_STEPS):
     """Fine-tune GPT model locally using Hugging Face Trainer."""
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
@@ -202,26 +204,42 @@ async def extract_user_msgs(guild, channel, user):
     print(f'Messages from user {user.name} saved to {o_file_path}.')
 
 
-async def generate_text(channel, prompt, author, max_len=100):
+async def generate_text(channel, prompt, author, max_len=100, include_prefix=True):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
         cotton_tokenizer, cotton_model = load_model(author)
 
     inputs = cotton_tokenizer(prompt, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
 
-    with torch.no_grad():
-        outputs = cotton_model.generate(
-            **inputs,
-            do_sample=True,
-            max_length=max_len,
-            temperature=0.7,
-            repetition_penalty=1.5,
-            pad_token_id=cotton_tokenizer.eos_token_id
-        )
+    if include_prefix==True:
+        with torch.no_grad():
+            outputs = cotton_model.generate(
+                **inputs,
+                do_sample=True,
+                max_length=max_len,
+                temperature=0.7,
+                repetition_penalty=1.5,
+                pad_token_id=cotton_tokenizer.eos_token_id,
+                eos_token_id=cotton_tokenizer.eos_token_id
+            )
 
-    text = cotton_tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print(text)
+        text = cotton_tokenizer.decode(outputs[0], skip_special_tokens=True)
+    else:
+        with torch.no_grad():
+            outputs = cotton_model.generate(
+                **inputs,
+                do_sample=True,
+                max_new_tokens=max_len,
+                temperature=0.7,
+                repetition_penalty=1.5,
+                pad_token_id=cotton_tokenizer.eos_token_id,
+                eos_token_id=cotton_tokenizer.eos_token_id
+            )
+        text = cotton_tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+
+    print('Output:',text)
     await channel.send(f"{author} says: ```{text.strip()}```")
+    return text
 
 
 # -------------------------------------------------------------
@@ -247,6 +265,7 @@ async def on_ready():
 async def on_message(message):
     global time_last_msg
 
+    # don't react to own messages
     if message.author == client.user:
         return
 
@@ -259,6 +278,7 @@ async def on_message(message):
     if PRIV_MODE and not channel.id == PRIV_ID:
         return
     
+    # learning mode
     if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
         command = content[len(BOT_PREFIX):].split()
         if not command:
@@ -278,6 +298,7 @@ async def on_message(message):
                 else:
                     await channel.send("User not found!")
 
+    # speaking mode, command behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'command':
         if not content.lower().startswith(BOT_PREFIX):
             return
@@ -298,12 +319,17 @@ async def on_message(message):
             async with channel.typing():
                 await generate_text(channel, prefix, R_AUTHOR, max_len=max_len)
 
+    # speaking mode, auto-reply behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'auto':
         if time_last_msg is None or message.created_at - time_last_msg > datetime.timedelta(seconds=TIME_MIN_REPLY):
             time_last_msg = message.created_at
-            prefix = await find_prompt(channel, 1)
+            system_prompt = f"""<|startoftext|><|im_start|>system\nYou are {R_AUTHOR}, a storyteller who spins tales.<|im_end|>"""
+            context = memory.get_buffer()
+            combined_prompt = f"""{system_prompt}\nContext: {context}\n{message.author} said: {content}\nRespond naturally and relevantly.\n"""
             async with channel.typing():
-                await generate_text(channel, prefix, R_AUTHOR, max_len=100)
+                response = await generate_text(channel, combined_prompt, R_AUTHOR, max_len=100, include_prefix=False)
+            memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
+            memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
         else:
             print("Message cooldown active.")
 
@@ -317,7 +343,11 @@ async def client_loop():
     await client.start(BOT_TOKEN)
 
 def init():
-    global client_loop_ref
+    global client_loop_ref, memory
+
+    # if auto-reply behavior is selected, initialize memory
+    if GEN_MODE == 'auto':
+        memory = CottonMemory(model_type='no-chain')
 
     print('cottonbot client starting...')
 

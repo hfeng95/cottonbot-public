@@ -1,7 +1,8 @@
 @echo off
 python cotton_train.py ^
-  --data "sample/nykko.txt" ^
-  --output "checkpoint/nykko" ^
-  --model "LiquidAI/LFM2-350M" ^
-  --epochs 5
+  --data "sample/kristen.txt" ^
+  --output "checkpoint/kristen" ^
+  --model "LiquidAI/LFM2-700M" ^
+  --steps 100 ^
+  --epochs 1
 pause
