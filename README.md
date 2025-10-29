@@ -18,7 +18,9 @@ conda activate cottonbot
 
 The core functionalities of cottonbot are user/channel-specific,
 so cottonbot must be present on the server where the user/channel
-is active.
+is active. Make sure to set `BOT_TOKEN` with your Discord bot token and
+`PRIV_ID` with channel ID if you want cottonbot to run only on a specified
+channel.
 
 ### Training
 To extract data from the message history of a Discord channel, 
