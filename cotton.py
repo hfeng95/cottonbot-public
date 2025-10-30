@@ -34,7 +34,7 @@ with open('config.json') as f:
 BOT_PREFIX = "&cotton "
 HISTORY_LIMIT = 4000
 CONTEXT_LIMIT = 5
-LENGTH_LIMIT = 512
+LENGTH_LIMIT = 512  # TODO: implement frontend
 N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
 
@@ -42,6 +42,9 @@ BOT_MODE = 'speak'   # listen/speak
 GEN_MODE = 'command'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
+ADAPTIVE = True     # TODO: implement frontend
+TEMPERATURE = 0.7   # TODO: implement
+
 
 TIME_MIN_REPLY = 8
 
@@ -50,11 +53,11 @@ client = discord.Client(intents=intents)
 
 cotton_tokenizer = None
 cotton_model = None
-time_last_msg = None
+time_last_msg = None    # global variable for now. TODO: separate for each server/channel
 
 client_loop_ref = None
 
-memory = None
+memory = None           # global variable for now. TODO: separate for each server/channel
 
 
 # -------------------------------------------------------------
@@ -206,10 +209,26 @@ async def extract_user_msgs(guild, channel, user):
     print(f'Messages from user {user.name} saved to {o_file_path}.')
 
 
-async def generate_text(channel, prompt, author, max_len=100, include_prefix=True):
+async def generate_text(channel, prompt, author, max_len=100, include_prefix=True, adaptive=False):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
         cotton_tokenizer, cotton_model = load_model(author)
+
+    if adaptive:
+        text = await generate_adaptive(
+            model=cotton_model,
+            tokenizer=cotton_tokenizer,
+            inputs=prompt,
+            max_new_tokens=max_len,
+            temperature=0.7,
+            repetition_penalty=1.5,
+            entropy_threshold=4.0,
+            patience=5,
+            max_sentences=2
+        )
+        print('Output (with adaptive termination):',text)
+        await channel.send(f"{author} says: ```{text.strip()}```")
+        return text
 
     # if prompt is a string, encode. otherwise, assume it is a dict of tokenized ids.
     if isinstance(prompt,str):
@@ -223,7 +242,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_length=max_len,
-                temperature=0.7,
+                temperature=0.4,
                 repetition_penalty=1.5,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -236,7 +255,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_new_tokens=max_len,
-                temperature=0.7,
+                temperature=0.4,
                 repetition_penalty=1.5,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -257,11 +276,13 @@ async def generate_adaptive(
     temperature=0.7,
     repetition_penalty=1.5,
     entropy_threshold=4.0,
-    patience=5
+    patience=5,
+    max_sentences=None
 ):
     input_ids = inputs["input_ids"].clone()
     past_key_values = None
     uncertain_steps = 0
+    sentence_count = 0
 
     for _ in range(max_new_tokens):
         with torch.no_grad():
@@ -296,6 +317,14 @@ async def generate_adaptive(
             input_ids = torch.cat([input_ids, next_token], dim=-1)
             past_key_values = outputs.past_key_values
 
+            # check if we exceed max sentence limit
+            if max_sentences:
+                next_str = tokenizer.decode(next_token[0],skip_special_tokens=True)
+                if next_str.strip().endswith(('.', '!', '?')):
+                    sentence_count += 1
+                if sentence_count > max_sentences:
+                    break
+
             # Stop if EOS token is reached
             if next_token.item() == tokenizer.eos_token_id:
                 break
@@ -307,10 +336,13 @@ async def generate_adaptive(
     )
 
 
-async def build_chat_prompt(tokenizer, system_message, user_message, context=''):
+async def build_chat_prompt(tokenizer, system_message, user_message, context=None):
+    if context is None:
+        context = ''
+    else:
+        context += ' '
     messages = [
-        {"role": "system", "content": system_message},
-        {"role": "context", "content": context},
+        {"role": "system", "content": context+system_message},
         {"role": "user", "content": user_message}
     ]
     return tokenizer.apply_chat_template(
@@ -319,7 +351,7 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context='')
         add_generation_prompt=True,
         return_dict=True,
         return_tensors="pt"
-    ).to("cuda" if torch.cuda.is_available() else "cpu")
+    ).to(cotton_model.device)
 
 
 # -------------------------------------------------------------
@@ -407,7 +439,13 @@ async def on_message(message):
             context = memory.get_buffer()
             combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context)
             async with channel.typing():
-                response = await generate_text(channel, combined_prompt, R_AUTHOR, max_len=128, include_prefix=False)
+                response = await generate_text(
+                    channel=channel,
+                    prompt=combined_prompt,
+                    author=R_AUTHOR,
+                    max_len=128,
+                    include_prefix=False,
+                    adaptive=True)
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
         else:

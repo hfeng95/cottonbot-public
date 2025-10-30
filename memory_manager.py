@@ -2,7 +2,7 @@ from langchain.memory import ConversationBufferMemory, ConversationSummaryMemory
 from langchain_community.vectorstores import FAISS
 import os
 
-DEFAULT_MODEL_TYPE = 'no-chain' # openai/ollama/hf/no-chain
+DEFAULT_MODEL_TYPE = 'no-chain' # openai/ollama/hf/no-chain. no-chain uses homebrew implementation
 
 
 class CottonMemory:
