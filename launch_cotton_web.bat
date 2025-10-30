@@ -12,7 +12,7 @@ REM Optional: check if Flask is installed
 python -c "import flask" 2>nul
 if errorlevel 1 (
     echo Flask not found. Installing...
-    pip install flask
+    pip install flask==3.1.2
 )
 
 REM Run the Flask web app
