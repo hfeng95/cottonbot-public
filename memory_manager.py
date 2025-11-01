@@ -87,8 +87,9 @@ class CottonMemory:
         else:
             self.vectorstore = FAISS.from_texts(["CottonBot awakens anew."], self.embeddings)
 
-        # Memory layers, right now we only use summary
-        self.memory = ConversationSummaryMemory(llm=self.llm, memory_key="summary")
+        # Memory layers
+        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+        self.summary = ConversationSummaryMemory(llm=self.llm, memory_key="summary")
 
     def save(self,path=None):
         """Persist memory to disk."""
@@ -97,14 +98,16 @@ class CottonMemory:
         os.makedirs(path, exist_ok=True)
         self.vectorstore.save_local(os.path.join(path, "long_term.faiss"))
 
-    def save_context(self, user_input, bot_output, user_name='User',bot_name='cottonbot'):
+    def save_context(self, user_input, bot_output, user_name='User',bot_name='cottonbot',num_rounds=3):
         """Store new chat turns."""
-        if self.model_type=='no-chain':
-            new_messages = f"{user_name}: {user_input}\n{bot_name}: {bot_output}"
-            combined_text = f"{self.conversation_summary}\n\n{new_messages}"
-            self.conversation_summary = self.llm.invoke(combined_text, max_new_tokens=150, min_length=30, do_sample=False)
-        
         self.memory.save_context({"input": user_input}, {"output": bot_output})
+        if self.model_type=='no-chain':
+            recent_messages = '\n'.join(self.get_recent_conversation(user_name=user_name,bot_name=bot_name,num_rounds=num_rounds))
+            combined_text = f"{self.conversation_summary}\n{recent_messages}"
+            self.conversation_summary = self.llm.invoke(combined_text, max_new_tokens=150, min_length=30, do_sample=False)
+            print('Summary:',self.conversation_summary)
+        else:
+            self.summary.save_context({"input": user_input}, {"output": bot_output})
 
     def get_context(self):
         """Retrieve memory context for prompting."""
@@ -113,7 +116,20 @@ class CottonMemory:
     def get_buffer(self):
         if self.model_type=='no-chain':
             return self.conversation_summary
-        return self.memory.buffer
+        return self.summary.buffer
+    
+    def get_recent_conversation(self, user_name='User',bot_name='cottonbot',num_rounds=3,return_separated=False):
+        """Return the most recent n rounds of conversation (user + bot pairs)."""
+        messages = self.memory.chat_memory.messages[-2*num_rounds:]
+        pairs = []
+        for i in range(0, len(messages), 2):
+            user_msg = messages[i].content if i < len(messages) else ""
+            bot_msg = messages[i+1].content if i+1 < len(messages) else ""
+            if return_separated:
+                pairs.append(((user_name,user_msg),(bot_name,bot_msg)))
+            else:
+                pairs.append(f"{user_name}: {user_msg}\n{bot_name}: {bot_msg}")
+        return pairs
 
     def reflect(self):
         """Generate reflective summaries to improve future recall."""
