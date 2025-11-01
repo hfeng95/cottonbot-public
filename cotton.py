@@ -57,7 +57,7 @@ time_last_msg = None    # global variable for now. TODO: separate for each serve
 
 client_loop_ref = None
 
-memory = None           # global variable for now. TODO: separate for each server/channel
+memory_manager_dict = {}
 
 
 # -------------------------------------------------------------
@@ -221,7 +221,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
             inputs=prompt,
             max_new_tokens=max_len,
             temperature=0.7,
-            repetition_penalty=1.5,
+            repetition_penalty=1.2,
             entropy_threshold=4.0,
             patience=5,
             max_sentences=2
@@ -243,7 +243,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 do_sample=True,
                 max_length=max_len,
                 temperature=0.4,
-                repetition_penalty=1.5,
+                repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
             )
@@ -256,7 +256,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 do_sample=True,
                 max_new_tokens=max_len,
                 temperature=0.4,
-                repetition_penalty=1.5,
+                repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
             )
@@ -336,15 +336,25 @@ async def generate_adaptive(
     )
 
 
-async def build_chat_prompt(tokenizer, system_message, user_message, context=None):
+async def build_chat_prompt(tokenizer, system_message, user_message, context=None, recent_conversation=None):
     if context is None:
         context = ''
     else:
         context += ' '
-    messages = [
-        {"role": "system", "content": context+system_message},
-        {"role": "user", "content": user_message}
-    ]
+    if recent_conversation:
+        messages = [{"role": "system", "content": context+system_message}]
+        for user_turn,bot_turn in recent_conversation:
+            user_name,user_msg = user_turn
+            bot_name,bot_msg = bot_turn
+            messages.append({'role':'user','content':user_msg})
+            messages.append({'role':'assistant','content':bot_msg})
+        messages.append({"role": "user", "content": user_message})
+    else:
+        messages = [ # TODO: multiple lines from chat history
+            {"role": "system", "content": context+system_message},
+            {"role": "user", "content": user_message}
+        ]
+    print('====================\n',messages)
     return tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -370,6 +380,24 @@ async def on_ready():
         name=activity_name, type=discord.ActivityType.watching
     )
     await client.change_presence(status=discord.Status.online, activity=activity)
+
+    # if auto-reply behavior is selected, initialize memory
+    if GEN_MODE == 'auto':
+        if PRIV_MODE:
+            guild,channel = client.get_channel(PRIV_ID).guild,client.get_channel(PRIV_ID)
+            print(f'Loading memory for guild {guild} ({guild.id}) channel {channel} ({channel.id}).')
+            memory_manager_dict[guild.id] = {}
+            memory_manager_dict[guild.id][channel.id] = CottonMemory(model_type='no-chain')
+        else:
+            for guild in client.guilds:
+                bot_id = guild.get_member(client.user.id)
+                memory_manager_dict[guild.id] = {}
+                for channel in guild.text_channels:
+                    if not channel.permissions_for(bot_id).send_messages:
+                        continue
+                    print(f'Loading memory for guild {guild} ({guild.id}) channel {channel} ({channel.id}).')
+                    memory_manager_dict[guild.id][channel.id] = CottonMemory(model_type='no-chain')
+
     print(f"Cottonbot is ready.")
 
 
@@ -434,10 +462,12 @@ async def on_message(message):
     # speaking mode, auto-reply behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'auto':
         if time_last_msg is None or message.created_at - time_last_msg > datetime.timedelta(seconds=TIME_MIN_REPLY):
+            memory = memory_manager_dict[guild.id][channel.id]
             time_last_msg = message.created_at
             system_prompt = f"""You are {R_AUTHOR}, a helpful storyteller who spins tales and answers questions."""
             context = memory.get_buffer()
-            combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context)
+            recent_conversation = memory.get_recent_conversation(user_name=message.author,bot_name=R_AUTHOR,num_rounds=3,return_separated=True)
+            combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation)
             async with channel.typing():
                 response = await generate_text(
                     channel=channel,
@@ -461,11 +491,7 @@ async def client_loop():
     await client.start(BOT_TOKEN)
 
 def init():
-    global client_loop_ref, memory
-
-    # if auto-reply behavior is selected, initialize memory
-    if GEN_MODE == 'auto':
-        memory = CottonMemory(model_type='no-chain')
+    global client_loop_ref, memory_manager_dict
 
     print('cottonbot client starting...')
 
