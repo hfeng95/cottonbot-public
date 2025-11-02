@@ -17,13 +17,15 @@ import argparse
 import torch
 import torch.nn.functional as F
 from memory_manager import CottonMemory
+from wikier import WikiAgent
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     Trainer,
     TrainingArguments,
     TextDataset,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    pipeline
 )
 
 with open('config.json') as f:
@@ -53,6 +55,9 @@ client = discord.Client(intents=intents)
 
 cotton_tokenizer = None
 cotton_model = None
+router_pipeline = None
+wiki_agent = None
+
 time_last_msg = None    # global variable for now. TODO: separate for each server/channel
 
 client_loop_ref = None
@@ -100,6 +105,15 @@ def load_model(author: str):
     else:
         print('CUDA not found. Using CPU.')
     return tokenizer, model
+
+def load_router():
+    print('Loading tool router')
+    router = pipeline(
+        "zero-shot-classification",
+        model="sileod/deberta-v3-xsmall-tasksource-nli",
+        device_map="auto"
+    )
+    return router
 
 # DEPRECATED: training should be done in cotton_train.py
 def fine_tune_model(train_path: str, output_dir: str, steps: int = N_STEPS):
@@ -209,6 +223,24 @@ async def extract_user_msgs(guild, channel, user):
     print(f'Messages from user {user.name} saved to {o_file_path}.')
 
 
+async def consult_agent(query: str):
+    """Return the most likely category of a user query."""
+    """Selects appropriate agent/tool and returns output"""
+    labels = ["history", "politics", "science", "programming", "entertainment", "storytelling", "casual conversation"]
+    result = router_pipeline(query, candidate_labels=labels)
+    category = result["labels"][0]                # Top prediction
+    print(f"[Router] Category: {category}")
+
+    if category in ["history", "politics", "science"]:
+        # call wiki agent
+        wiki_results = wiki_agent.lookup_body(query)
+        if not wiki_results: return None
+        return wiki_results[0]
+
+    # TODO: coding agent
+
+    return None
+
 async def generate_text(channel, prompt, author, max_len=100, include_prefix=True, adaptive=False):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
@@ -268,6 +300,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
 
 
 # experimental, adaptive stopping
+# TODO: if we reach max token limit, trim output from last sentence end
 async def generate_adaptive(
     model,
     tokenizer,
@@ -354,7 +387,6 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context=Non
             {"role": "system", "content": context+system_message},
             {"role": "user", "content": user_message}
         ]
-    print('====================\n',messages)
     return tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -369,8 +401,10 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context=Non
 # -------------------------------------------------------------
 @client.event
 async def on_ready():
-    global cotton_tokenizer, cotton_model
+    global cotton_tokenizer, cotton_model, router_pipeline, wiki_agent
     cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
+    router_pipeline = load_router()
+    wiki_agent = WikiAgent()
 
     activity_name = {
         'listen': "and learning",
@@ -466,6 +500,10 @@ async def on_message(message):
             time_last_msg = message.created_at
             system_prompt = f"""You are {R_AUTHOR}, a helpful storyteller who spins tales and answers questions."""
             context = memory.get_buffer()
+            agent_input = await consult_agent(content)
+            if agent_input:
+                context += ' ' + agent_input
+            print(context)
             recent_conversation = memory.get_recent_conversation(user_name=message.author,bot_name=R_AUTHOR,num_rounds=3,return_separated=True)
             combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation)
             async with channel.typing():
