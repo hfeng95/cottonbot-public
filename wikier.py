@@ -22,7 +22,11 @@ class WikiAgent:
 
     def extract_keywords(self, query: str):
         """Extracts key nouns and named entities, sorted by rarity/importance."""
-        doc = self.nlp(query)
+        # casing workaround. alternatively you can try uncased model or truecasing
+        query_combined = query + '\n' + query.title()
+
+        doc = self.nlp(query_combined)
+
         candidates = [token for token in doc if token.pos_ in ("NOUN", "PROPN")]
         entities = [ent.text for ent in doc.ents]
 
