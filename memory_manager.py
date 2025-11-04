@@ -2,7 +2,7 @@ from langchain.memory import ConversationBufferMemory, ConversationSummaryMemory
 from langchain_community.vectorstores import FAISS
 import os
 
-DEFAULT_MODEL_TYPE = 'no-chain' # openai/ollama/hf/no-chain. no-chain uses homebrew implementation
+DEFAULT_MODEL_TYPE = 'no-chain' # openai/ollama/hf/no-chain. no-chain uses homebrew implementation. TODO: implement frontend
 
 
 class CottonMemory:
@@ -85,7 +85,7 @@ class CottonMemory:
                 faiss_path, self.embeddings, allow_dangerous_deserialization=True
             )
         else:
-            self.vectorstore = FAISS.from_texts(["CottonBot awakens anew."], self.embeddings)
+            self.vectorstore = FAISS.from_texts(["cottonbot awakens anew."], self.embeddings)
 
         # Memory layers
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
