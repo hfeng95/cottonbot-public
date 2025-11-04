@@ -22,6 +22,9 @@ is active. Make sure to set `BOT_TOKEN` with your Discord bot token and
 `PRIV_ID` with channel ID if you want cottonbot to run only on a specified
 channel.
 
+For TTS features, you need FFmpeg. See [here](https://www.ffmpeg.org/)
+for more info. Place `ffmpeg.exe` in the main folder.
+
 ### Training
 To extract data from the message history of a Discord channel, 
 cottonbot must have access to the channel.
@@ -37,7 +40,7 @@ accessed via `http://127.0.0.1:5000/`.
 From here, you can:
 - Choose bot mode: Learning or Speaking.
 - Specify behavior and author.
-- Click Awaken to start the bot.
-- Click Slumber to terminate it.
+
+Press Awaken/Slumber to start/close the bot.
 
 Alternatively, you can run `cotton.py` directly.

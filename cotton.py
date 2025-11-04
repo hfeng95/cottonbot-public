@@ -16,6 +16,8 @@ import sys
 import argparse
 import torch
 import torch.nn.functional as F
+import soundfile as sf
+import nacl
 from memory_manager import CottonMemory
 from wikier import WikiAgent
 from transformers import (
@@ -33,7 +35,7 @@ with open('config.json') as f:
     BOT_TOKEN = f_data['BOT_TOKEN']
     PRIV_ID = f_data['PRIV_ID']
 
-BOT_PREFIX = "&cotton "
+BOT_PREFIX = "$cotton "
 HISTORY_LIMIT = 4000
 CONTEXT_LIMIT = 5
 LENGTH_LIMIT = 512  # TODO: implement frontend
@@ -41,11 +43,12 @@ N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
 
 BOT_MODE = 'speak'   # listen/speak
-GEN_MODE = 'command'   # command/auto
+GEN_MODE = 'auto'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
 ADAPTIVE = True     # TODO: implement frontend
 TEMPERATURE = 0.7   # TODO: implement
+TTS_ENABLED = True  # TODO: implement frontent
 
 
 TIME_MIN_REPLY = 8
@@ -57,6 +60,8 @@ cotton_tokenizer = None
 cotton_model = None
 router_pipeline = None
 wiki_agent = None
+tts_tokenizer = None
+tts_model = None
 
 time_last_msg = None    # global variable for now. TODO: separate for each server/channel
 
@@ -114,6 +119,13 @@ def load_router():
         device_map="auto"
     )
     return router
+
+def load_tts_model():
+    print('Loading TTS model')
+    from transformers import VitsModel
+    model = VitsModel.from_pretrained("facebook/mms-tts-eng")
+    tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-eng")
+    return tokenizer,model
 
 # DEPRECATED: training should be done in cotton_train.py
 def fine_tune_model(train_path: str, output_dir: str, steps: int = N_STEPS):
@@ -226,12 +238,12 @@ async def extract_user_msgs(guild, channel, user):
 async def consult_agent(query: str):
     """Return the most likely category of a user query."""
     """Selects appropriate agent/tool and returns output"""
-    labels = ["history", "politics", "science", "programming", "entertainment", "storytelling", "casual conversation"]
+    labels = ["history", "politics", "science", "geography", "programming", "entertainment", "storytelling", "casual conversation"]
     result = router_pipeline(query, candidate_labels=labels)
     category = result["labels"][0]                # Top prediction
     print(f"[Router] Category: {category}")
 
-    if category in ["history", "politics", "science"]:
+    if category in ["history", "politics", "science", "geography"]:
         # call wiki agent
         wiki_results = wiki_agent.lookup_body(query)
         if not wiki_results: return None
@@ -369,6 +381,46 @@ async def generate_adaptive(
     )
 
 
+async def play_tts(author, guild, text):
+
+    if not author.voice:
+        print("User is not in a voice channel.")
+        return
+
+    # Generate TTS audio
+    print('Synthesizing speech')
+    inputs = tts_tokenizer(text, return_tensors="pt")
+
+    with torch.no_grad():
+        speech = tts_model(**inputs).waveform
+
+    print('Writing sound file')
+    output_path="tts_output.wav"
+    try:
+        sf.write(output_path, speech.squeeze().cpu().numpy(), 16000)
+    except Exception as e:
+        print(f'Error: {e}')
+
+    voice_channel = author.voice.channel
+
+    if not guild.voice_client:
+        print('Connecting to voice channel',voice_channel)
+        vc = await voice_channel.connect()
+    else:
+        vc = guild.voice_client
+        if vc.channel != voice_channel:
+            print('Moving to voice channel',voice_channel)
+            await vc.move_to(voice_channel)
+
+    # Use ffmpeg to stream to Discord
+    try:
+        vc.play(discord.FFmpegPCMAudio(executable="ffmpeg.exe", source=output_path))
+    except Exception as e:
+        print(f'Error: {e}')
+    while vc.is_playing():
+        await asyncio.sleep(0.5)
+
+
 async def build_chat_prompt(tokenizer, system_message, user_message, context=None, recent_conversation=None):
     if context is None:
         context = ''
@@ -401,10 +453,12 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context=Non
 # -------------------------------------------------------------
 @client.event
 async def on_ready():
-    global cotton_tokenizer, cotton_model, router_pipeline, wiki_agent
+    global cotton_tokenizer, cotton_model, router_pipeline, wiki_agent, tts_tokenizer, tts_model
     cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
     router_pipeline = load_router()
     wiki_agent = WikiAgent()
+    if TTS_ENABLED:
+        tts_tokenizer,tts_model = load_tts_model()
 
     activity_name = {
         'listen': "and learning",
@@ -502,7 +556,7 @@ async def on_message(message):
             context = memory.get_buffer()
             agent_input = await consult_agent(content)
             if agent_input:
-                context += ' ' + agent_input
+                context += '\nHere is some background knowledge: ' + agent_input
             print(context)
             recent_conversation = memory.get_recent_conversation(user_name=message.author,bot_name=R_AUTHOR,num_rounds=3,return_separated=True)
             combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation)
@@ -516,6 +570,8 @@ async def on_message(message):
                     adaptive=True)
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
+            if TTS_ENABLED:
+                await play_tts(author=message.author,guild=guild,text=response)
         else:
             print("Message cooldown active.")
 
@@ -533,7 +589,7 @@ def init():
 
     print('cottonbot client starting...')
 
-    asyncio.run(client.start(BOT_TOKEN))
+    client.run(BOT_TOKEN)
     client_loop_ref = asyncio.get_running_loop()
 
 def main(args):

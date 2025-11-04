@@ -7,7 +7,7 @@ dependencies:
   - pip=24.0
   - python=3.10.14
   - pip:
-      - discord-py==2.3.2
+      - discord.py==2.6.2
       - numpy==1.26.4
       - tokenizers==0.22.1
       - torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
@@ -22,3 +22,5 @@ dependencies:
       - datasets==4.3.0
       - wikipedia==1.4.0
       - spacy[cuda12x]==3.8.7
+      - soundfile==0.13.1
+      - discord.py[voice]==2.6.2
