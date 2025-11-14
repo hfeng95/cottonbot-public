@@ -3,8 +3,8 @@
 ## Installation
 ```
 git clone https://github.com/hfeng95/cottonbot-public.git
+cd cottonbot-public
 conda env create --file environment.yml
-cd cottonbot
 ```
 
 You need a Discord bot token to host cottonbot. You can find information
@@ -38,9 +38,13 @@ if it hasn't been installed already and start the Web UI which can be
 accessed via `http://127.0.0.1:5000/`.
 
 From here, you can:
-- Choose bot mode: Learning or Speaking.
-- Specify behavior and author.
+- Choose bot mode:
+  - Learning: for gathering training data on channel messages. Use the 
+`learn` bot command. Use responsibly with the consent of all affected parties.
+  - Speaking: for inference.
+- Specify behavior and author. Use the auto-reply behavior for agentic functions.
+  - For OpenAI, put the model as the author. For example, "gpt-5".
 
-Press Awaken/Slumber to start/close the bot.
+Click on Awaken/Slumber to start/close the bot.
 
 Alternatively, you can run `cotton.py` directly.

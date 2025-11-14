@@ -20,6 +20,7 @@ import soundfile as sf
 import nacl
 from memory_manager import CottonMemory
 from wikier import WikiAgent
+from modder import ModAgent
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -35,12 +36,14 @@ with open('config.json') as f:
     BOT_TOKEN = f_data['BOT_TOKEN']
     PRIV_ID = f_data['PRIV_ID']
 
+# TODO: CLI for all parameters
 BOT_PREFIX = "$cotton "
 HISTORY_LIMIT = 4000
 CONTEXT_LIMIT = 5
 LENGTH_LIMIT = 512  # TODO: implement frontend
 N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
+TTS_MODEL = "facebook/mms-tts-eng"
 
 BOT_MODE = 'speak'   # listen/speak
 GEN_MODE = 'auto'   # command/auto
@@ -48,7 +51,8 @@ PRIV_MODE = True
 R_AUTHOR = "nykko"
 ADAPTIVE = True     # TODO: implement frontend
 TEMPERATURE = 0.7   # TODO: implement
-TTS_ENABLED = True  # TODO: implement frontent
+TTS_ENABLED = False  # TODO: implement frontend/command toggle per server
+MODDER_ENABLED = True # TODO: implement frontend
 
 
 TIME_MIN_REPLY = 8
@@ -62,6 +66,8 @@ router_pipeline = None
 wiki_agent = None
 tts_tokenizer = None
 tts_model = None
+openai_client = None
+modder_agent = None
 
 time_last_msg = None    # global variable for now. TODO: separate for each server/channel
 
@@ -92,6 +98,11 @@ def parse_args():
 # -------------------------------------------------------------
 def load_model(author: str):
     """Load fine-tuned model if exists, else base model."""
+    if 'gpt' in author:
+        print(f'GPT model name detected, loading OpenAI client.')
+        from openai import OpenAI
+        global openai_client
+        openai_client = OpenAI()     # TODO: needs to be tested
     save_path = os.path.join("checkpoint", author)
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     tokenizer.pad_token = tokenizer.eos_token  # For stability
@@ -123,8 +134,11 @@ def load_router():
 def load_tts_model():
     print('Loading TTS model')
     from transformers import VitsModel
-    model = VitsModel.from_pretrained("facebook/mms-tts-eng")
-    tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-eng")
+    model = VitsModel.from_pretrained(TTS_MODEL)
+    tokenizer = AutoTokenizer.from_pretrained(TTS_MODEL)
+    if(torch.cuda.is_available()):
+        # model.to('cuda') TODO: not working
+        print('TTS model loaded with CUDA.')
     return tokenizer,model
 
 # DEPRECATED: training should be done in cotton_train.py
@@ -253,6 +267,10 @@ async def consult_agent(query: str):
 
     return None
 
+async def toxicity_filter(text: str):
+    is_toxic = await modder_agent.check_toxicity(text)
+    return is_toxic
+
 async def generate_text(channel, prompt, author, max_len=100, include_prefix=True, adaptive=False):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
@@ -276,7 +294,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
 
     # if prompt is a string, encode. otherwise, assume it is a dict of tokenized ids.
     if isinstance(prompt,str):
-        inputs = cotton_tokenizer(prompt, return_tensors="pt").to(cotton_model.device)
+        inputs = cotton_tokenizer(prompt, return_tensors="pt")
     else:
         inputs = prompt
 
@@ -380,6 +398,23 @@ async def generate_adaptive(
         skip_special_tokens=True
     )
 
+async def generate_openai(
+    channel,
+    openai_client,
+    prompt,
+    max_new_tokens=256,
+    temperature=0.7
+):
+    response = openai_client.chat.completions.create(
+        model=R_AUTHOR,  # Or your chosen model
+        messages=prompt,
+        max_tokens=max_new_tokens,  # Limits the length of the generated response
+        temperature=temperature, # Controls randomness (0.0-1.0)
+    )
+    text = response.choices[0].message.content
+    await channel.send(f"{R_AUTHOR} says: ```{text.strip()}```")
+    return text
+
 
 async def play_tts(author, guild, text):
 
@@ -392,7 +427,7 @@ async def play_tts(author, guild, text):
     inputs = tts_tokenizer(text, return_tensors="pt")
 
     with torch.no_grad():
-        speech = tts_model(**inputs).waveform
+        speech = tts_model(**inputs).waveform.to(tts_model.device)
 
     print('Writing sound file')
     output_path="tts_output.wav"
@@ -421,12 +456,12 @@ async def play_tts(author, guild, text):
         await asyncio.sleep(0.5)
 
 
-async def build_chat_prompt(tokenizer, system_message, user_message, context=None, recent_conversation=None):
+async def build_chat_prompt(tokenizer, system_message, user_message, context=None, recent_conversation=None, return_dict=False):
     if context is None:
         context = ''
     else:
         context += ' '
-    if recent_conversation:
+    if recent_conversation: # if multiple rounds of conversation are provided
         messages = [{"role": "system", "content": context+system_message}]
         for user_turn,bot_turn in recent_conversation:
             user_name,user_msg = user_turn
@@ -435,10 +470,12 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context=Non
             messages.append({'role':'assistant','content':bot_msg})
         messages.append({"role": "user", "content": user_message})
     else:
-        messages = [ # TODO: multiple lines from chat history
+        messages = [
             {"role": "system", "content": context+system_message},
             {"role": "user", "content": user_message}
         ]
+    if return_dict:
+        return messages
     return tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -453,12 +490,15 @@ async def build_chat_prompt(tokenizer, system_message, user_message, context=Non
 # -------------------------------------------------------------
 @client.event
 async def on_ready():
-    global cotton_tokenizer, cotton_model, router_pipeline, wiki_agent, tts_tokenizer, tts_model
-    cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
+    global cotton_tokenizer, cotton_model, router_pipeline, wiki_agent, tts_tokenizer, tts_model, openai_client, modder_agent
+    if not openai_client:
+        cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
     router_pipeline = load_router()
     wiki_agent = WikiAgent()
     if TTS_ENABLED:
         tts_tokenizer,tts_model = load_tts_model()
+    if MODDER_ENABLED:
+        modder_agent = ModAgent()
 
     activity_name = {
         'listen': "and learning",
@@ -506,6 +546,9 @@ async def on_message(message):
     if PRIV_MODE and not channel.id == PRIV_ID:
         return
     
+    # check toxicity
+    await toxicity_filter(content)
+    
     # learning mode
     if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
         command = content[len(BOT_PREFIX):].split()
@@ -522,9 +565,10 @@ async def on_message(message):
                 user_name = command[1]
                 user = discord.utils.find(lambda m: m.name.lower() == user_name.lower(), guild.members)
                 if user:
+                    await channel.send(f"Collecting data from user {user} on channel {channel}.")
                     await extract_user_msgs(guild, channel, user)
                 else:
-                    await channel.send("User not found!")
+                    await channel.send(f"User {user} not found on channel {channel}!")
 
     # speaking mode, command behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'command':
@@ -554,22 +598,37 @@ async def on_message(message):
             time_last_msg = message.created_at
             system_prompt = f"""You are {R_AUTHOR}, a helpful storyteller who spins tales and answers questions."""
             context = memory.get_buffer()
+
             agent_input = await consult_agent(content)
             if agent_input:
                 context += '\nHere is some background knowledge: ' + agent_input
             print(context)
+
             recent_conversation = memory.get_recent_conversation(user_name=message.author,bot_name=R_AUTHOR,num_rounds=3,return_separated=True)
-            combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation)
-            async with channel.typing():
-                response = await generate_text(
-                    channel=channel,
-                    prompt=combined_prompt,
-                    author=R_AUTHOR,
-                    max_len=128,
-                    include_prefix=False,
-                    adaptive=True)
+
+            if openai_client:
+                combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation,return_dict=True)
+                async with channel.typing():
+                    response = await generate_openai(
+                        channel=channel,
+                        openai_client=openai_client,
+                        prompt=combined_prompt,
+                        author=R_AUTHOR,
+                        max_new_tokens=128)
+            else:
+                combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation,return_dict=False)
+                async with channel.typing():
+                    response = await generate_text(
+                        channel=channel,
+                        prompt=combined_prompt,
+                        author=R_AUTHOR,
+                        max_len=128,
+                        include_prefix=False,
+                        adaptive=True)
+                    
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
+
             if TTS_ENABLED:
                 await play_tts(author=message.author,guild=guild,text=response)
         else:
