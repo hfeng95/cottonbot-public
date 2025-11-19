@@ -43,16 +43,19 @@ CONTEXT_LIMIT = 5
 LENGTH_LIMIT = 512  # TODO: implement frontend
 N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
+MEMORY_MODEL = "LiquidAI/LFM2-350M"
 TTS_MODEL = "facebook/mms-tts-eng"
+MODDER_MODEL = "s-nlp/roberta_toxicity_classifier"
+MODDER_CAUSAL_MODEL = None
 
 BOT_MODE = 'speak'   # listen/speak
 GEN_MODE = 'auto'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
-ADAPTIVE = True     # TODO: implement frontend
-TEMPERATURE = 0.7   # TODO: implement
-TTS_ENABLED = False  # TODO: implement frontend/command toggle per server
-MODDER_ENABLED = True # TODO: implement frontend
+ADAPTIVE = True
+TEMPERATURE = 0.7
+TTS_ENABLED = False  # TODO: implement command toggle per server
+MODDER_ENABLED = True
 
 
 TIME_MIN_REPLY = 8
@@ -86,11 +89,58 @@ def set_params(bot, gen, author):
     GEN_MODE = gen
     R_AUTHOR = author
 
+def set_model_params(base_model=None, memory_model=None, tts_model=None, modder_model=None, modder_causal_model=None):
+    global BASE_MODEL, MEMORY_MODEL, TTS_MODEL, MODDER_MODEL, MODDER_CAUSAL_MODEL
+    
+    if base_model:
+        BASE_MODEL = base_model
+    if memory_model:
+        MEMORY_MODEL = memory_model
+    if tts_model:
+        TTS_MODEL = tts_model
+    if modder_model:
+        MODDER_MODEL = modder_model
+    if modder_causal_model:
+        MODDER_CAUSAL_MODEL = modder_causal_model
+
+def set_feature_params(adaptive=None, temperature=None, tts_enabled=None, modder_enabled=None):
+    global ADAPTIVE, TEMPERATURE, TTS_ENABLED, MODDER_ENABLED
+    
+    if adaptive is not None:
+        ADAPTIVE = adaptive
+    if temperature is not None:
+        TEMPERATURE = temperature
+    if tts_enabled is not None:
+        TTS_ENABLED = tts_enabled
+    if modder_enabled is not None:
+        MODDER_ENABLED = modder_enabled
+
 def parse_args():
     parser = argparse.ArgumentParser(description="CottonBot configuration")
     parser.add_argument("--mode", type=str, default='speak', help="listen/speak")
     parser.add_argument("--behavior", type=str, default='command', help="command/auto")
     parser.add_argument("--author", type=str, default="shakespeare", help="target author name")
+    parser.add_argument("--base-model", type=str, default=None, help="Base model for text generation (default: LiquidAI/LFM2-350M)")
+    parser.add_argument("--memory-model", type=str, default=None, help="Model for memory management (default: LiquidAI/LFM2-350M)")
+    parser.add_argument("--tts-model", type=str, default=None, help="TTS model for speech synthesis (default: facebook/mms-tts-eng)")
+    parser.add_argument("--modder-model", type=str, default=None, help="Toxicity classifier model (default: s-nlp/roberta_toxicity_classifier)")
+    parser.add_argument("--modder-causal-model", type=str, default=None, help="Causal model for moderation reasoning (default: meta-llama/Llama-3.1-8B-Instruct)")
+    def str_to_bool(v):
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if v.lower() in ('yes', 'true', 't', 'y', '1'):
+            return True
+        elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+            return False
+        else:
+            raise argparse.ArgumentTypeError('Boolean value expected.')
+    
+    parser.add_argument("--adaptive", type=str_to_bool, default=None, help="Enable adaptive text generation (true/false)")
+    parser.add_argument("--temperature", type=float, default=None, help="Temperature for text generation (0.0-2.0, default: 0.7)")
+    parser.add_argument("--tts-enabled", type=str_to_bool, default=None, help="Enable TTS features (true/false)")
+    parser.add_argument("--modder-enabled", type=str_to_bool, default=None, help="Enable moderation features (true/false)")
     return parser.parse_args()
 
 # -------------------------------------------------------------
@@ -131,11 +181,13 @@ def load_router():
     )
     return router
 
-def load_tts_model():
-    print('Loading TTS model')
+def load_tts_model(model_name=None):
+    if model_name is None:
+        model_name = TTS_MODEL
+    print(f'Loading TTS model: {model_name}')
     from transformers import VitsModel
-    model = VitsModel.from_pretrained(TTS_MODEL)
-    tokenizer = AutoTokenizer.from_pretrained(TTS_MODEL)
+    model = VitsModel.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if(torch.cuda.is_available()):
         # model.to('cuda') TODO: not working
         print('TTS model loaded with CUDA.')
@@ -282,7 +334,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
             tokenizer=cotton_tokenizer,
             inputs=prompt,
             max_new_tokens=max_len,
-            temperature=0.7,
+            temperature=TEMPERATURE,
             repetition_penalty=1.2,
             entropy_threshold=4.0,
             patience=5,
@@ -304,7 +356,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_length=max_len,
-                temperature=0.4,
+                temperature=TEMPERATURE,
                 repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -317,7 +369,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_new_tokens=max_len,
-                temperature=0.4,
+                temperature=TEMPERATURE,
                 repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -498,7 +550,10 @@ async def on_ready():
     if TTS_ENABLED:
         tts_tokenizer,tts_model = load_tts_model()
     if MODDER_ENABLED:
-        modder_agent = ModAgent()
+        modder_agent = ModAgent(
+            toxicity_model_name=MODDER_MODEL,
+            causal_model_name=MODDER_CAUSAL_MODEL
+        )
 
     activity_name = {
         'listen': "and learning",
@@ -547,7 +602,12 @@ async def on_message(message):
         return
     
     # check toxicity
-    await toxicity_filter(content)
+    if MODDER_ENABLED:
+        toxicity = await toxicity_filter(content)
+        if toxicity > 0.995:
+            await message.delete()
+            await channel.send(f"Message deleted for toxicity.")
+            return
     
     # learning mode
     if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
@@ -589,7 +649,7 @@ async def on_message(message):
             except (IndexError, ValueError):
                 max_len = LENGTH_LIMIT
             async with channel.typing():
-                await generate_text(channel, prefix, R_AUTHOR, max_len=max_len)
+                await generate_text(channel, prefix, R_AUTHOR, max_len=max_len, adaptive=ADAPTIVE)
 
     # speaking mode, auto-reply behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'auto':
@@ -613,8 +673,8 @@ async def on_message(message):
                         channel=channel,
                         openai_client=openai_client,
                         prompt=combined_prompt,
-                        author=R_AUTHOR,
-                        max_new_tokens=128)
+                        max_new_tokens=128,
+                        temperature=TEMPERATURE)
             else:
                 combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation,return_dict=False)
                 async with channel.typing():
@@ -624,7 +684,7 @@ async def on_message(message):
                         author=R_AUTHOR,
                         max_len=128,
                         include_prefix=False,
-                        adaptive=True)
+                        adaptive=ADAPTIVE)
                     
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
@@ -657,6 +717,19 @@ def main(args):
     r_author = args.author
 
     set_params(bot_mode, gen_mode, r_author)
+    set_model_params(
+        base_model=args.base_model,
+        memory_model=args.memory_model,
+        tts_model=args.tts_model,
+        modder_model=args.modder_model,
+        modder_causal_model=args.modder_causal_model
+    )
+    set_feature_params(
+        adaptive=args.adaptive,
+        temperature=args.temperature,
+        tts_enabled=args.tts_enabled,
+        modder_enabled=args.modder_enabled
+    )
     init()  # launches client loop, etc.
 
 if __name__ == "__main__":

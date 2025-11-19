@@ -22,14 +22,34 @@
             <div class="form-row">
                 <div class="form-label">Behavior</div>
                 <select id="in_gen_mode" name="in_gen_mode">
-                    <option value="command" selected>Command-triggered</option>
-                    <option value="auto">Auto-response</option>
+                    <option value="command">Command-triggered</option>
+                    <option value="auto" selected>Auto-response</option>
                 </select>
             </div>
 
 
             <label for="in_r_author">Author</label>
             <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare">
+
+            <div class="form-row">
+                <div class="form-label">Adaptive Generation</div>
+                <input type="checkbox" id="in_adaptive" name="in_adaptive" {% if settings.adaptive %}checked{% endif %}>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">Temperature</div>
+                <input type="number" id="in_temperature" name="in_temperature" step="0.1" min="0" max="2" value="{{ settings.temperature or 0.7 }}">
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">TTS Enabled</div>
+                <input type="checkbox" id="in_tts_enabled" name="in_tts_enabled" {% if settings.tts_enabled %}checked{% endif %}>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">Moderation Enabled</div>
+                <input type="checkbox" id="in_modder_enabled" name="in_modder_enabled" {% if settings.modder_enabled %}checked{% endif %}>
+            </div>
         </div>
         <div style="text-align:center;">
             <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken" cotton-state="torun">awaken</button>
@@ -72,6 +92,10 @@
                         formData.append("in_bot_mode", document.getElementById("in_bot_mode").value || "");
                         formData.append("in_gen_mode", document.getElementById("in_gen_mode").value || "");
                         formData.append("in_r_author", document.getElementById("in_r_author").value || "");
+                        formData.append("in_adaptive", document.getElementById("in_adaptive").checked ? "true" : "false");
+                        formData.append("in_temperature", document.getElementById("in_temperature").value || "");
+                        formData.append("in_tts_enabled", document.getElementById("in_tts_enabled").checked ? "true" : "false");
+                        formData.append("in_modder_enabled", document.getElementById("in_modder_enabled").checked ? "true" : "false");
                         const res = await fetch("/run_cotton", { method: "POST", body: formData });
                         const j = await res.json();
                         logMessage("Awaken response: " + JSON.stringify(j));

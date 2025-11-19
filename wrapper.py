@@ -9,6 +9,10 @@ settings = {
     "bot_mode": 'speak',
     "gen_mode": 'command',
     "r_author": "shakespeare",
+    "adaptive": True,
+    "temperature": 0.7,
+    "tts_enabled": False,
+    "modder_enabled": True,
     "is_running": False,
 }
 
@@ -34,6 +38,26 @@ def run_cotton():
         r_author = data.get("in_r_author", "").strip()
         if r_author:
             settings["r_author"] = r_author
+        
+        # Handle boolean/feature settings
+        adaptive = data.get("in_adaptive", "").strip().lower()
+        if adaptive in ('true', 'false', '1', '0'):
+            settings["adaptive"] = adaptive in ('true', '1')
+        
+        temperature = data.get("in_temperature", "").strip()
+        if temperature:
+            try:
+                settings["temperature"] = float(temperature)
+            except ValueError:
+                pass
+        
+        tts_enabled = data.get("in_tts_enabled", "").strip().lower()
+        if tts_enabled in ('true', 'false', '1', '0'):
+            settings["tts_enabled"] = tts_enabled in ('true', '1')
+        
+        modder_enabled = data.get("in_modder_enabled", "").strip().lower()
+        if modder_enabled in ('true', 'false', '1', '0'):
+            settings["modder_enabled"] = modder_enabled in ('true', '1')
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
 
@@ -48,6 +72,16 @@ def run_cotton():
         "--behavior", settings["gen_mode"],
         "--author", settings["r_author"],
     ]
+    
+    # Add feature flags if they differ from defaults or are explicitly set
+    if settings.get("adaptive") is not None:
+        cmd.extend(["--adaptive", str(settings["adaptive"]).lower()])
+    if settings.get("temperature") is not None:
+        cmd.extend(["--temperature", str(settings["temperature"])])
+    if settings.get("tts_enabled") is not None:
+        cmd.extend(["--tts-enabled", str(settings["tts_enabled"]).lower()])
+    if settings.get("modder_enabled") is not None:
+        cmd.extend(["--modder-enabled", str(settings["modder_enabled"]).lower()])
 
     bot_process = subprocess.Popen(
         cmd,
