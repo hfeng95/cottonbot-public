@@ -2,8 +2,26 @@ from flask import Flask, render_template, request, jsonify
 import subprocess
 import signal
 import os
+import json
 
 app = Flask(__name__)
+
+SERVER_SETTINGS_FILE = "server_settings.json"
+
+def load_server_settings():
+    """Load server-specific settings from JSON file."""
+    if os.path.exists(SERVER_SETTINGS_FILE):
+        try:
+            with open(SERVER_SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_server_settings(server_settings):
+    """Save server-specific settings to JSON file."""
+    with open(SERVER_SETTINGS_FILE, 'w') as f:
+        json.dump(server_settings, f, indent=2)
 
 settings = {
     "bot_mode": 'speak',
@@ -117,6 +135,35 @@ def close_cotton():
 @app.route("/status", methods=["GET"])
 def status():
     return jsonify(settings)
+
+@app.route("/api/server-settings", methods=["GET"])
+def get_server_settings():
+    """Get all server-specific settings."""
+    server_settings = load_server_settings()
+    return jsonify({"status": "ok", "server_settings": server_settings})
+
+@app.route("/api/server-settings", methods=["POST"])
+def update_server_settings():
+    """Update server-specific settings."""
+    try:
+        data = request.json or {}
+        server_settings = load_server_settings()
+        
+        # Expected format: {server_id: {tts_enabled: bool, modder_enabled: bool}, ...}
+        for server_id, settings in data.items():
+            server_id_str = str(server_id)
+            if server_id_str not in server_settings:
+                server_settings[server_id_str] = {}
+            
+            if "tts_enabled" in settings:
+                server_settings[server_id_str]["tts_enabled"] = bool(settings["tts_enabled"])
+            if "modder_enabled" in settings:
+                server_settings[server_id_str]["modder_enabled"] = bool(settings["modder_enabled"])
+        
+        save_server_settings(server_settings)
+        return jsonify({"status": "ok", "server_settings": server_settings})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == "__main__":

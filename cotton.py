@@ -78,6 +78,33 @@ client_loop_ref = None
 
 memory_manager_dict = {}
 
+SERVER_SETTINGS_FILE = "server_settings.json"
+
+def load_server_settings():
+    """Load server-specific settings from JSON file."""
+    if os.path.exists(SERVER_SETTINGS_FILE):
+        try:
+            with open(SERVER_SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_server_settings(server_settings):
+    """Save server-specific settings to JSON file."""
+    with open(SERVER_SETTINGS_FILE, 'w') as f:
+        json.dump(server_settings, f, indent=2)
+
+def get_server_setting(guild_id, setting_name, default_value):
+    """Get a server-specific setting, with fallback to global default."""
+    server_settings = load_server_settings()
+    guild_id_str = str(guild_id)
+    
+    if guild_id_str not in server_settings:
+        return default_value
+    
+    return server_settings[guild_id_str].get(setting_name, default_value)
+
 
 # -------------------------------------------------------------
 # Utility
@@ -323,6 +350,116 @@ async def toxicity_filter(text: str):
     is_toxic = await modder_agent.check_toxicity(text)
     return is_toxic
 
+async def parse_moderation_action(judge_response: str):
+    """
+    Parse the judge response to extract moderation action.
+    Returns: (action, reason) where action is one of: warn, delete, timeout, kick, ban
+    """
+    response_lower = judge_response.lower()
+    
+    # Extract action from response
+    if 'ban' in response_lower:
+        return ('ban', judge_response)
+    elif 'kick' in response_lower:
+        return ('kick', judge_response)
+    elif 'timeout' in response_lower:
+        return ('timeout', judge_response)
+    elif 'delete' in response_lower or 'deleted' in response_lower:
+        return ('delete', judge_response)
+    elif 'warn' in response_lower or 'warning' in response_lower:
+        return ('warn', judge_response)
+    else:
+        # Default to delete if no clear action found
+        return ('delete', judge_response)
+
+async def execute_moderation_action(message, action: str, reason: str):
+    """
+    Execute the moderation action on the message/author.
+    For kick/ban, only timeout and recommend the action.
+    """
+    author = message.author
+    channel = message.channel
+    guild = message.guild
+    
+    try:
+        if action == 'delete':
+            await message.delete()
+            await channel.send(f"Message deleted. Reason: {reason[:200]}")
+            return True
+        
+        elif action == 'warn':
+            await channel.send(f"⚠️ Warning to {author.mention}: {reason[:200]}")
+            return True
+        
+        elif action == 'timeout':
+            # Timeout for 1 hour
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            try:
+                # message.author is already a Member object in guild context
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=reason[:200])
+                    await channel.send(f"⏱️ {author.mention} has been timed out for 1 hour. Reason: {reason[:200]}")
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user: {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        elif action == 'kick':
+            # Timeout instead and recommend kick
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            try:
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=f"Recommended kick: {reason[:200]}")
+                    await channel.send(
+                        f"⏱️ {author.mention} has been timed out. "
+                        f"**Recommendation:** Consider kicking this user. Reason: {reason[:200]}"
+                    )
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user (kick recommendation): {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        elif action == 'ban':
+            # Timeout instead and recommend ban
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+            try:
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=f"Recommended ban: {reason[:200]}")
+                    await channel.send(
+                        f"⏱️ {author.mention} has been timed out for 24 hours. "
+                        f"**Recommendation:** Consider banning this user. Reason: {reason[:200]}"
+                    )
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user (ban recommendation): {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        return False
+    except Exception as e:
+        print(f"Error executing moderation action {action}: {e}")
+        return False
+
 async def generate_text(channel, prompt, author, max_len=100, include_prefix=True, adaptive=False):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
@@ -547,6 +684,7 @@ async def on_ready():
         cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
     router_pipeline = load_router()
     wiki_agent = WikiAgent()
+    # TTS and Modder are loaded globally but enabled per-server
     if TTS_ENABLED:
         tts_tokenizer,tts_model = load_tts_model()
     if MODDER_ENABLED:
@@ -601,13 +739,41 @@ async def on_message(message):
     if PRIV_MODE and not channel.id == PRIV_ID:
         return
     
-    # check toxicity
-    if MODDER_ENABLED:
-        toxicity = await toxicity_filter(content)
-        if toxicity > 0.995:
-            await message.delete()
-            await channel.send(f"Message deleted for toxicity.")
-            return
+    # check toxicity (per-server setting)
+    server_modder_enabled = get_server_setting(guild.id, "modder_enabled", MODDER_ENABLED)
+    if server_modder_enabled and modder_agent:
+        # Check if causal model is available for advanced moderation
+        has_causal_model = hasattr(modder_agent, 'llm') and modder_agent.llm is not None
+        
+        if has_causal_model:
+            # Use judge function for advanced moderation. TODO: needs testing
+            try:
+                judge_response = await modder_agent.judge(content)
+                action, reason = await parse_moderation_action(judge_response)
+                
+                # Check if message should be allowed
+                if 'yes' in judge_response.lower()[:50] and 'no' not in judge_response.lower()[:50]:
+                    # Message is allowed, continue processing
+                    pass
+                else:
+                    # Message should be moderated
+                    await execute_moderation_action(message, action, reason)
+                    return
+            except Exception as e:
+                print(f"Error in moderation judge: {e}")
+                # Fallback to simple toxicity check
+                toxicity = await toxicity_filter(content)
+                if toxicity and toxicity > 0.995:
+                    await message.delete()
+                    await channel.send(f"Message deleted for toxicity.")
+                    return
+        else:
+            # Fallback to simple toxicity check if no causal model
+            toxicity = await toxicity_filter(content)
+            if toxicity and toxicity > 0.995:
+                await message.delete()
+                await channel.send(f"Message deleted for toxicity.")
+                return
     
     # learning mode
     if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
@@ -689,7 +855,9 @@ async def on_message(message):
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
 
-            if TTS_ENABLED:
+            # TTS per-server setting
+            server_tts_enabled = get_server_setting(guild.id, "tts_enabled", TTS_ENABLED)
+            if server_tts_enabled:
                 await play_tts(author=message.author,guild=guild,text=response)
         else:
             print("Message cooldown active.")
