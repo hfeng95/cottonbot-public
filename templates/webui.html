@@ -22,14 +22,51 @@
             <div class="form-row">
                 <div class="form-label">Behavior</div>
                 <select id="in_gen_mode" name="in_gen_mode">
-                    <option value="command" selected>Command-triggered</option>
-                    <option value="auto">Auto-response</option>
+                    <option value="command">Command-triggered</option>
+                    <option value="auto" selected>Auto-response</option>
                 </select>
             </div>
 
 
             <label for="in_r_author">Author</label>
-            <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare">
+            <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare" style="border-radius: 3px; border: 1px solid #555; background: #222; color: #fff;">
+
+            <div class="form-row">
+                <div class="form-label">Adaptive Generation</div>
+                <input type="checkbox" id="in_adaptive" name="in_adaptive" {% if settings.adaptive %}checked{% endif %}>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">Temperature</div>
+                <input type="number" id="in_temperature" name="in_temperature" step="0.1" min="0" max="2" value="{{ settings.temperature or 0.7 }}">
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">TTS Enabled (Global Default)</div>
+                <input type="checkbox" id="in_tts_enabled" name="in_tts_enabled" {% if settings.tts_enabled %}checked{% endif %}>
+            </div>
+
+            <div class="form-row">
+                <div class="form-label">Moderation Enabled (Global Default)</div>
+                <input type="checkbox" id="in_modder_enabled" name="in_modder_enabled" {% if settings.modder_enabled %}checked{% endif %}>
+            </div>
+        </div>
+        
+        <div id="server-settings-panel">
+            <h2 style="text-align: center; color: #343638; margin-top: 0;">Per-Server Settings</h2>
+            <p style="text-align: center; color: #343638; font-size: 12px; margin-top: 0;">Configure TTS and Moderation settings for each server</p>
+            
+            <div style="margin-bottom: 15px;">
+                <input type="text" id="new-server-id" placeholder="Enter Server ID to add" style="width: 60%; padding: 8px; border-radius: 3px; border: 1px solid #555; background: #222; color: #fff;">
+                <button type="button" id="add-server-btn" class="buttonlink" style="width: auto; min-width: 100px; margin-left: 10px; padding: 8px 15px;">Add Server</button>
+            </div>
+            
+            <button type="button" id="refresh-server-settings" class="buttonlink" style="width: auto; min-width: 150px; margin-bottom: 10px;">Refresh Settings</button>
+            <button type="button" id="save-server-settings" class="buttonlink" style="width: auto; min-width: 150px; margin-bottom: 10px; margin-left: 10px;">Save All Settings</button>
+            
+            <div id="server-settings-list" style="max-height: 400px; overflow-y: auto; background: #222; border-radius: 5px; padding: 10px; margin-top: 10px;">
+                <p style="color: #fff; text-align: center;">Loading server settings...</p>
+            </div>
         </div>
         <div style="text-align:center;">
             <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken" cotton-state="torun">awaken</button>
@@ -38,8 +75,14 @@
 
     <div id="status-indicator">Status: asleep</div>
 
-    <div id="console-log">
-      [System] Awaiting command...
+    <hr id="console-divider">
+    <div id="console-log-panel">
+        <div id="console-log-header">
+            Console Log
+        </div>
+        <div id="console-log">
+            [System] Awaiting command...
+        </div>
     </div>
 
     <script>
@@ -72,6 +115,10 @@
                         formData.append("in_bot_mode", document.getElementById("in_bot_mode").value || "");
                         formData.append("in_gen_mode", document.getElementById("in_gen_mode").value || "");
                         formData.append("in_r_author", document.getElementById("in_r_author").value || "");
+                        formData.append("in_adaptive", document.getElementById("in_adaptive").checked ? "true" : "false");
+                        formData.append("in_temperature", document.getElementById("in_temperature").value || "");
+                        formData.append("in_tts_enabled", document.getElementById("in_tts_enabled").checked ? "true" : "false");
+                        formData.append("in_modder_enabled", document.getElementById("in_modder_enabled").checked ? "true" : "false");
                         const res = await fetch("/run_cotton", { method: "POST", body: formData });
                         const j = await res.json();
                         logMessage("Awaken response: " + JSON.stringify(j));
@@ -97,6 +144,136 @@
                     }
                 }
             });
+
+            // Per-Server Settings Management
+            const serverSettingsList = document.getElementById("server-settings-list");
+            const refreshBtn = document.getElementById("refresh-server-settings");
+            const saveBtn = document.getElementById("save-server-settings");
+            const addServerBtn = document.getElementById("add-server-btn");
+            const newServerIdInput = document.getElementById("new-server-id");
+            let serverSettings = {};
+
+            async function loadServerSettings() {
+                try {
+                    serverSettingsList.innerHTML = "<p style='color: #fff; text-align: center;'>Loading server settings...</p>";
+                    const res = await fetch("/api/server-settings");
+                    const data = await res.json();
+                    
+                    if (data.status === "error") {
+                        serverSettingsList.innerHTML = `<p style='color: #f00; text-align: center;'>${data.message}</p>`;
+                        return;
+                    }
+
+                    serverSettings = data.server_settings || {};
+                    renderServerSettings();
+                } catch (err) {
+                    console.error("Failed to load server settings:", err);
+                    serverSettingsList.innerHTML = `<p style='color: #f00; text-align: center;'>Error loading settings: ${err.message}</p>`;
+                }
+            }
+
+            function renderServerSettings() {
+                if (Object.keys(serverSettings).length === 0) {
+                    serverSettingsList.innerHTML = "<p style='color: #fff; text-align: center;'>No server settings configured. Add a server ID above.</p>";
+                    return;
+                }
+
+                let html = "";
+                for (const [serverId, settings] of Object.entries(serverSettings)) {
+                    const ttsEnabled = settings.tts_enabled !== undefined ? settings.tts_enabled : true;
+                    const modderEnabled = settings.modder_enabled !== undefined ? settings.modder_enabled : true;
+                    
+                    html += `<div class="server-setting-item" style="background: #343638; padding: 10px; margin-bottom: 10px; border-radius: 3px;">`;
+                    html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">`;
+                    html += `<strong style="color: #fff;">Server ID: ${serverId}</strong>`;
+                    html += `<button type="button" class="remove-server-btn" data-server-id="${serverId}" style="background: #f00; color: #fff; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">Remove</button>`;
+                    html += `</div>`;
+                    html += `<div class="form-row" style="margin-bottom: 5px;">`;
+                    html += `<div class="form-label" style="color: #fff; width: 50%;">TTS Enabled</div>`;
+                    html += `<input type="checkbox" class="server-tts-checkbox" data-server-id="${serverId}" ${ttsEnabled ? "checked" : ""} style="margin-left: 10px;">`;
+                    html += `</div>`;
+                    html += `<div class="form-row">`;
+                    html += `<div class="form-label" style="color: #fff; width: 50%;">Moderation Enabled</div>`;
+                    html += `<input type="checkbox" class="server-modder-checkbox" data-server-id="${serverId}" ${modderEnabled ? "checked" : ""} style="margin-left: 10px;">`;
+                    html += `</div>`;
+                    html += `</div>`;
+                }
+                serverSettingsList.innerHTML = html;
+
+                // Add event listeners
+                document.querySelectorAll(".server-tts-checkbox").forEach(cb => {
+                    cb.addEventListener("change", (e) => {
+                        const serverId = e.target.getAttribute("data-server-id");
+                        if (!serverSettings[serverId]) {
+                            serverSettings[serverId] = {};
+                        }
+                        serverSettings[serverId].tts_enabled = e.target.checked;
+                    });
+                });
+
+                document.querySelectorAll(".server-modder-checkbox").forEach(cb => {
+                    cb.addEventListener("change", (e) => {
+                        const serverId = e.target.getAttribute("data-server-id");
+                        if (!serverSettings[serverId]) {
+                            serverSettings[serverId] = {};
+                        }
+                        serverSettings[serverId].modder_enabled = e.target.checked;
+                    });
+                });
+
+                document.querySelectorAll(".remove-server-btn").forEach(btn => {
+                    btn.addEventListener("click", (e) => {
+                        const serverId = e.target.getAttribute("data-server-id");
+                        delete serverSettings[serverId];
+                        renderServerSettings();
+                    });
+                });
+            }
+
+            async function saveServerSettings() {
+                try {
+                    const res = await fetch("/api/server-settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(serverSettings)
+                    });
+                    const data = await res.json();
+                    if (data.status === "ok") {
+                        logMessage("Server settings saved successfully");
+                        loadServerSettings(); // Reload to get updated data
+                    } else {
+                        logMessage("Error saving server settings: " + data.message);
+                    }
+                } catch (err) {
+                    console.error("Failed to save server settings:", err);
+                    logMessage("Error saving server settings: " + err.message);
+                }
+            }
+
+            addServerBtn.addEventListener("click", () => {
+                const serverId = newServerIdInput.value.trim();
+                if (!serverId) {
+                    alert("Please enter a server ID");
+                    return;
+                }
+                
+                if (!serverSettings[serverId]) {
+                    serverSettings[serverId] = {
+                        tts_enabled: true,
+                        modder_enabled: true
+                    };
+                    renderServerSettings();
+                    newServerIdInput.value = "";
+                } else {
+                    alert("Server already exists in settings");
+                }
+            });
+
+            refreshBtn.addEventListener("click", loadServerSettings);
+            saveBtn.addEventListener("click", saveServerSettings);
+
+            // Load server settings on page load
+            loadServerSettings();
         });
     </script>
 </body>

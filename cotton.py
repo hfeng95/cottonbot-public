@@ -43,16 +43,19 @@ CONTEXT_LIMIT = 5
 LENGTH_LIMIT = 512  # TODO: implement frontend
 N_STEPS = 100
 BASE_MODEL = "LiquidAI/LFM2-350M"
+MEMORY_MODEL = "LiquidAI/LFM2-350M"
 TTS_MODEL = "facebook/mms-tts-eng"
+MODDER_MODEL = "s-nlp/roberta_toxicity_classifier"
+MODDER_CAUSAL_MODEL = None
 
 BOT_MODE = 'speak'   # listen/speak
 GEN_MODE = 'auto'   # command/auto
 PRIV_MODE = True
 R_AUTHOR = "nykko"
-ADAPTIVE = True     # TODO: implement frontend
-TEMPERATURE = 0.7   # TODO: implement
-TTS_ENABLED = False  # TODO: implement frontend/command toggle per server
-MODDER_ENABLED = True # TODO: implement frontend
+ADAPTIVE = True
+TEMPERATURE = 0.7
+TTS_ENABLED = False  # TODO: implement command toggle per server
+MODDER_ENABLED = True
 
 
 TIME_MIN_REPLY = 8
@@ -75,6 +78,33 @@ client_loop_ref = None
 
 memory_manager_dict = {}
 
+SERVER_SETTINGS_FILE = "server_settings.json"
+
+def load_server_settings():
+    """Load server-specific settings from JSON file."""
+    if os.path.exists(SERVER_SETTINGS_FILE):
+        try:
+            with open(SERVER_SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_server_settings(server_settings):
+    """Save server-specific settings to JSON file."""
+    with open(SERVER_SETTINGS_FILE, 'w') as f:
+        json.dump(server_settings, f, indent=2)
+
+def get_server_setting(guild_id, setting_name, default_value):
+    """Get a server-specific setting, with fallback to global default."""
+    server_settings = load_server_settings()
+    guild_id_str = str(guild_id)
+    
+    if guild_id_str not in server_settings:
+        return default_value
+    
+    return server_settings[guild_id_str].get(setting_name, default_value)
+
 
 # -------------------------------------------------------------
 # Utility
@@ -86,11 +116,58 @@ def set_params(bot, gen, author):
     GEN_MODE = gen
     R_AUTHOR = author
 
+def set_model_params(base_model=None, memory_model=None, tts_model=None, modder_model=None, modder_causal_model=None):
+    global BASE_MODEL, MEMORY_MODEL, TTS_MODEL, MODDER_MODEL, MODDER_CAUSAL_MODEL
+    
+    if base_model:
+        BASE_MODEL = base_model
+    if memory_model:
+        MEMORY_MODEL = memory_model
+    if tts_model:
+        TTS_MODEL = tts_model
+    if modder_model:
+        MODDER_MODEL = modder_model
+    if modder_causal_model:
+        MODDER_CAUSAL_MODEL = modder_causal_model
+
+def set_feature_params(adaptive=None, temperature=None, tts_enabled=None, modder_enabled=None):
+    global ADAPTIVE, TEMPERATURE, TTS_ENABLED, MODDER_ENABLED
+    
+    if adaptive is not None:
+        ADAPTIVE = adaptive
+    if temperature is not None:
+        TEMPERATURE = temperature
+    if tts_enabled is not None:
+        TTS_ENABLED = tts_enabled
+    if modder_enabled is not None:
+        MODDER_ENABLED = modder_enabled
+
 def parse_args():
     parser = argparse.ArgumentParser(description="CottonBot configuration")
     parser.add_argument("--mode", type=str, default='speak', help="listen/speak")
     parser.add_argument("--behavior", type=str, default='command', help="command/auto")
     parser.add_argument("--author", type=str, default="shakespeare", help="target author name")
+    parser.add_argument("--base-model", type=str, default=None, help="Base model for text generation (default: LiquidAI/LFM2-350M)")
+    parser.add_argument("--memory-model", type=str, default=None, help="Model for memory management (default: LiquidAI/LFM2-350M)")
+    parser.add_argument("--tts-model", type=str, default=None, help="TTS model for speech synthesis (default: facebook/mms-tts-eng)")
+    parser.add_argument("--modder-model", type=str, default=None, help="Toxicity classifier model (default: s-nlp/roberta_toxicity_classifier)")
+    parser.add_argument("--modder-causal-model", type=str, default=None, help="Causal model for moderation reasoning (default: meta-llama/Llama-3.1-8B-Instruct)")
+    def str_to_bool(v):
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if v.lower() in ('yes', 'true', 't', 'y', '1'):
+            return True
+        elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+            return False
+        else:
+            raise argparse.ArgumentTypeError('Boolean value expected.')
+    
+    parser.add_argument("--adaptive", type=str_to_bool, default=None, help="Enable adaptive text generation (true/false)")
+    parser.add_argument("--temperature", type=float, default=None, help="Temperature for text generation (0.0-2.0, default: 0.7)")
+    parser.add_argument("--tts-enabled", type=str_to_bool, default=None, help="Enable TTS features (true/false)")
+    parser.add_argument("--modder-enabled", type=str_to_bool, default=None, help="Enable moderation features (true/false)")
     return parser.parse_args()
 
 # -------------------------------------------------------------
@@ -131,11 +208,13 @@ def load_router():
     )
     return router
 
-def load_tts_model():
-    print('Loading TTS model')
+def load_tts_model(model_name=None):
+    if model_name is None:
+        model_name = TTS_MODEL
+    print(f'Loading TTS model: {model_name}')
     from transformers import VitsModel
-    model = VitsModel.from_pretrained(TTS_MODEL)
-    tokenizer = AutoTokenizer.from_pretrained(TTS_MODEL)
+    model = VitsModel.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if(torch.cuda.is_available()):
         # model.to('cuda') TODO: not working
         print('TTS model loaded with CUDA.')
@@ -271,6 +350,116 @@ async def toxicity_filter(text: str):
     is_toxic = await modder_agent.check_toxicity(text)
     return is_toxic
 
+async def parse_moderation_action(judge_response: str):
+    """
+    Parse the judge response to extract moderation action.
+    Returns: (action, reason) where action is one of: warn, delete, timeout, kick, ban
+    """
+    response_lower = judge_response.lower()
+    
+    # Extract action from response
+    if 'ban' in response_lower:
+        return ('ban', judge_response)
+    elif 'kick' in response_lower:
+        return ('kick', judge_response)
+    elif 'timeout' in response_lower:
+        return ('timeout', judge_response)
+    elif 'delete' in response_lower or 'deleted' in response_lower:
+        return ('delete', judge_response)
+    elif 'warn' in response_lower or 'warning' in response_lower:
+        return ('warn', judge_response)
+    else:
+        # Default to delete if no clear action found
+        return ('delete', judge_response)
+
+async def execute_moderation_action(message, action: str, reason: str):
+    """
+    Execute the moderation action on the message/author.
+    For kick/ban, only timeout and recommend the action.
+    """
+    author = message.author
+    channel = message.channel
+    guild = message.guild
+    
+    try:
+        if action == 'delete':
+            await message.delete()
+            await channel.send(f"Message deleted. Reason: {reason[:200]}")
+            return True
+        
+        elif action == 'warn':
+            await channel.send(f"⚠️ Warning to {author.mention}: {reason[:200]}")
+            return True
+        
+        elif action == 'timeout':
+            # Timeout for 1 hour
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            try:
+                # message.author is already a Member object in guild context
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=reason[:200])
+                    await channel.send(f"⏱️ {author.mention} has been timed out for 1 hour. Reason: {reason[:200]}")
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user: {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        elif action == 'kick':
+            # Timeout instead and recommend kick
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            try:
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=f"Recommended kick: {reason[:200]}")
+                    await channel.send(
+                        f"⏱️ {author.mention} has been timed out. "
+                        f"**Recommendation:** Consider kicking this user. Reason: {reason[:200]}"
+                    )
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user (kick recommendation): {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        elif action == 'ban':
+            # Timeout instead and recommend ban
+            timeout_until = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+            try:
+                if isinstance(author, discord.Member):
+                    await author.timeout(timeout_until, reason=f"Recommended ban: {reason[:200]}")
+                    await channel.send(
+                        f"⏱️ {author.mention} has been timed out for 24 hours. "
+                        f"**Recommendation:** Consider banning this user. Reason: {reason[:200]}"
+                    )
+                    return True
+                else:
+                    await channel.send(f"❌ Cannot timeout {author.mention}: User not found in server.")
+                    return False
+            except discord.Forbidden:
+                await channel.send(f"❌ Cannot timeout {author.mention}: Insufficient permissions.")
+                return False
+            except Exception as e:
+                print(f"Error timing out user (ban recommendation): {e}")
+                await channel.send(f"❌ Error timing out {author.mention}: {str(e)}")
+                return False
+        
+        return False
+    except Exception as e:
+        print(f"Error executing moderation action {action}: {e}")
+        return False
+
 async def generate_text(channel, prompt, author, max_len=100, include_prefix=True, adaptive=False):
     global cotton_tokenizer, cotton_model
     if cotton_tokenizer is None or cotton_model is None:
@@ -282,7 +471,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
             tokenizer=cotton_tokenizer,
             inputs=prompt,
             max_new_tokens=max_len,
-            temperature=0.7,
+            temperature=TEMPERATURE,
             repetition_penalty=1.2,
             entropy_threshold=4.0,
             patience=5,
@@ -304,7 +493,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_length=max_len,
-                temperature=0.4,
+                temperature=TEMPERATURE,
                 repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -317,7 +506,7 @@ async def generate_text(channel, prompt, author, max_len=100, include_prefix=Tru
                 **inputs,
                 do_sample=True,
                 max_new_tokens=max_len,
-                temperature=0.4,
+                temperature=TEMPERATURE,
                 repetition_penalty=1.2,
                 pad_token_id=cotton_tokenizer.eos_token_id,
                 eos_token_id=cotton_tokenizer.eos_token_id
@@ -495,10 +684,14 @@ async def on_ready():
         cotton_tokenizer, cotton_model = load_model(R_AUTHOR)
     router_pipeline = load_router()
     wiki_agent = WikiAgent()
+    # TTS and Modder are loaded globally but enabled per-server
     if TTS_ENABLED:
         tts_tokenizer,tts_model = load_tts_model()
     if MODDER_ENABLED:
-        modder_agent = ModAgent()
+        modder_agent = ModAgent(
+            toxicity_model_name=MODDER_MODEL,
+            causal_model_name=MODDER_CAUSAL_MODEL
+        )
 
     activity_name = {
         'listen': "and learning",
@@ -546,8 +739,41 @@ async def on_message(message):
     if PRIV_MODE and not channel.id == PRIV_ID:
         return
     
-    # check toxicity
-    await toxicity_filter(content)
+    # check toxicity (per-server setting)
+    server_modder_enabled = get_server_setting(guild.id, "modder_enabled", MODDER_ENABLED)
+    if server_modder_enabled and modder_agent:
+        # Check if causal model is available for advanced moderation
+        has_causal_model = hasattr(modder_agent, 'llm') and modder_agent.llm is not None
+        
+        if has_causal_model:
+            # Use judge function for advanced moderation. TODO: needs testing
+            try:
+                judge_response = await modder_agent.judge(content)
+                action, reason = await parse_moderation_action(judge_response)
+                
+                # Check if message should be allowed
+                if 'yes' in judge_response.lower()[:50] and 'no' not in judge_response.lower()[:50]:
+                    # Message is allowed, continue processing
+                    pass
+                else:
+                    # Message should be moderated
+                    await execute_moderation_action(message, action, reason)
+                    return
+            except Exception as e:
+                print(f"Error in moderation judge: {e}")
+                # Fallback to simple toxicity check
+                toxicity = await toxicity_filter(content)
+                if toxicity and toxicity > 0.995:
+                    await message.delete()
+                    await channel.send(f"Message deleted for toxicity.")
+                    return
+        else:
+            # Fallback to simple toxicity check if no causal model
+            toxicity = await toxicity_filter(content)
+            if toxicity and toxicity > 0.995:
+                await message.delete()
+                await channel.send(f"Message deleted for toxicity.")
+                return
     
     # learning mode
     if BOT_MODE == 'listen' and content.lower().startswith(BOT_PREFIX):
@@ -589,7 +815,7 @@ async def on_message(message):
             except (IndexError, ValueError):
                 max_len = LENGTH_LIMIT
             async with channel.typing():
-                await generate_text(channel, prefix, R_AUTHOR, max_len=max_len)
+                await generate_text(channel, prefix, R_AUTHOR, max_len=max_len, adaptive=ADAPTIVE)
 
     # speaking mode, auto-reply behavior
     elif BOT_MODE == 'speak' and GEN_MODE == 'auto':
@@ -613,8 +839,8 @@ async def on_message(message):
                         channel=channel,
                         openai_client=openai_client,
                         prompt=combined_prompt,
-                        author=R_AUTHOR,
-                        max_new_tokens=128)
+                        max_new_tokens=128,
+                        temperature=TEMPERATURE)
             else:
                 combined_prompt = await build_chat_prompt(cotton_tokenizer,system_prompt,content,context,recent_conversation=recent_conversation,return_dict=False)
                 async with channel.typing():
@@ -624,12 +850,14 @@ async def on_message(message):
                         author=R_AUTHOR,
                         max_len=128,
                         include_prefix=False,
-                        adaptive=True)
+                        adaptive=ADAPTIVE)
                     
             memory.save_context(content,response,user_name=message.author,bot_name=R_AUTHOR)
             memory.save(path=os.path.join('memory_data',str(guild.id),str(channel.id)))
 
-            if TTS_ENABLED:
+            # TTS per-server setting
+            server_tts_enabled = get_server_setting(guild.id, "tts_enabled", TTS_ENABLED)
+            if server_tts_enabled:
                 await play_tts(author=message.author,guild=guild,text=response)
         else:
             print("Message cooldown active.")
@@ -657,6 +885,19 @@ def main(args):
     r_author = args.author
 
     set_params(bot_mode, gen_mode, r_author)
+    set_model_params(
+        base_model=args.base_model,
+        memory_model=args.memory_model,
+        tts_model=args.tts_model,
+        modder_model=args.modder_model,
+        modder_causal_model=args.modder_causal_model
+    )
+    set_feature_params(
+        adaptive=args.adaptive,
+        temperature=args.temperature,
+        tts_enabled=args.tts_enabled,
+        modder_enabled=args.modder_enabled
+    )
     init()  # launches client loop, etc.
 
 if __name__ == "__main__":
