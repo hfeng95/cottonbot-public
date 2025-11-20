@@ -2,85 +2,100 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>cottonbot control panel</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'cotton-orange': '#f7724a',
+                        'cotton-dark': '#343638',
+                        'cotton-bg': '#111',
+                    }
+                }
+            }
+        }
+    </script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-3edrmyuQ0w65f8gfBsqowzjJe2iM6n0nKciPUp8y+7E=" crossorigin="anonymous"></script>
 </head>
-<body>
-    <h1>cottonbot console</h1>
+<body class="bg-cotton-dark min-h-screen pb-[250px] overflow-y-scroll">
+    <h1 class="font-sans text-center mt-12 mb-1 text-cotton-orange text-4xl font-bold">cottonbot console</h1>
 
     <form action="/run_cotton" method="post" id="params-form">
-        <div id="bodypanel">
-            <div class="form-row">
-                <div class="form-label">Bot Mode</div>
-                <select id="in_bot_mode" name="in_bot_mode">
+        <div id="bodypanel" class="w-4/5 sm:w-3/5 md:w-2/5 min-w-[200px] mx-auto mb-0.5 text-center bg-cotton-orange rounded-lg py-2.5 px-5 font-sans text-base">
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">Bot Mode</div>
+                <select id="in_bot_mode" name="in_bot_mode" class="w-4/5 py-1 px-2 rounded border border-gray-600 bg-gray-800 text-white">
                     <option value="listen">Listening</option>
                     <option value="speak" selected>Speaking</option>
                 </select>
             </div>
             
-            <div class="form-row">
-                <div class="form-label">Behavior</div>
-                <select id="in_gen_mode" name="in_gen_mode">
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">Behavior</div>
+                <select id="in_gen_mode" name="in_gen_mode" class="w-4/5 py-1 px-2 rounded border border-gray-600 bg-gray-800 text-white">
                     <option value="command">Command-triggered</option>
                     <option value="auto" selected>Auto-response</option>
                 </select>
             </div>
 
+            <label for="in_r_author" class="mx-auto text-center bg-cotton-orange rounded-lg py-2.5 px-5 font-sans text-xs font-bold">Author</label>
+            <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare" class="w-full mt-2 mb-2 box-border rounded border border-gray-600 bg-gray-800 text-white py-2.5 px-2.5 font-bold placeholder-cotton-orange">
 
-            <label for="in_r_author">Author</label>
-            <input type="text" id="in_r_author" name="in_r_author" placeholder="e.g. shakespeare" style="border-radius: 3px; border: 1px solid #555; background: #222; color: #fff;">
-
-            <div class="form-row">
-                <div class="form-label">Adaptive Generation</div>
-                <input type="checkbox" id="in_adaptive" name="in_adaptive" {% if settings.adaptive %}checked{% endif %}>
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">Adaptive Generation</div>
+                <input type="checkbox" id="in_adaptive" name="in_adaptive" {% if settings.adaptive %}checked{% endif %} class="ml-2">
             </div>
 
-            <div class="form-row">
-                <div class="form-label">Temperature</div>
-                <input type="number" id="in_temperature" name="in_temperature" step="0.1" min="0" max="2" value="{{ settings.temperature or 0.7 }}">
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">Temperature</div>
+                <input type="number" id="in_temperature" name="in_temperature" step="0.1" min="0" max="2" value="{{ settings.temperature or 0.7 }}" class="w-4/5 py-1 px-2 rounded border border-gray-600 bg-gray-800 text-white">
             </div>
 
-            <div class="form-row">
-                <div class="form-label">TTS Enabled (Global Default)</div>
-                <input type="checkbox" id="in_tts_enabled" name="in_tts_enabled" {% if settings.tts_enabled %}checked{% endif %}>
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">TTS Enabled (Global Default)</div>
+                <input type="checkbox" id="in_tts_enabled" name="in_tts_enabled" {% if settings.tts_enabled %}checked{% endif %} class="ml-2">
             </div>
 
-            <div class="form-row">
-                <div class="form-label">Moderation Enabled (Global Default)</div>
-                <input type="checkbox" id="in_modder_enabled" name="in_modder_enabled" {% if settings.modder_enabled %}checked{% endif %}>
+            <div class="flex items-center justify-center gap-4 w-full mt-2 mb-2">
+                <div class="w-full text-left font-sans text-xs font-bold">Moderation Enabled (Global Default)</div>
+                <input type="checkbox" id="in_modder_enabled" name="in_modder_enabled" {% if settings.modder_enabled %}checked{% endif %} class="ml-2">
             </div>
         </div>
         
-        <div id="server-settings-panel">
-            <h2 style="text-align: center; color: #343638; margin-top: 0;">Per-Server Settings</h2>
-            <p style="text-align: center; color: #343638; font-size: 12px; margin-top: 0;">Configure TTS and Moderation settings for each server</p>
+        <div id="server-settings-panel" class="w-4/5 sm:w-3/5 md:w-2/5 min-w-[200px] mx-auto mb-0.5 text-center bg-cotton-orange rounded-lg py-2.5 px-5 font-sans text-base">
+            <h2 class="text-center text-cotton-dark mt-0 mb-2 text-xl font-bold">Per-Server Settings</h2>
+            <p class="text-center text-cotton-dark text-xs mt-0 mb-4">Configure TTS and Moderation settings for each server</p>
             
-            <div style="margin-bottom: 15px;">
-                <input type="text" id="new-server-id" placeholder="Enter Server ID to add" style="width: 60%; padding: 8px; border-radius: 3px; border: 1px solid #555; background: #222; color: #fff;">
-                <button type="button" id="add-server-btn" class="buttonlink" style="width: auto; min-width: 100px; margin-left: 10px; padding: 8px 15px;">Add Server</button>
+            <div class="mb-4 flex items-center gap-2">
+                <input type="text" id="new-server-id" placeholder="Enter Server ID to add" class="w-3/5 py-2 px-2 rounded border border-gray-600 bg-gray-800 text-white font-bold placeholder-cotton-orange">
+                <button type="button" id="add-server-btn" class="bg-cotton-orange border-none rounded-lg py-2 px-4 text-center font-sans font-bold text-base text-cotton-dark cursor-pointer hover:bg-orange-200 transition-colors duration-300 min-w-[100px]">Add Server</button>
             </div>
             
-            <button type="button" id="refresh-server-settings" class="buttonlink" style="width: auto; min-width: 150px; margin-bottom: 10px;">Refresh Settings</button>
-            <button type="button" id="save-server-settings" class="buttonlink" style="width: auto; min-width: 150px; margin-bottom: 10px; margin-left: 10px;">Save All Settings</button>
+            <div class="flex gap-2 mb-2.5">
+                <button type="button" id="refresh-server-settings" class="bg-cotton-orange border-none rounded-lg py-2.5 px-5 text-center font-sans font-bold text-base text-cotton-dark cursor-pointer hover:bg-orange-200 transition-colors duration-300 min-w-[150px]">Refresh Settings</button>
+                <button type="button" id="save-server-settings" class="bg-cotton-orange border-none rounded-lg py-2.5 px-5 text-center font-sans font-bold text-base text-cotton-dark cursor-pointer hover:bg-orange-200 transition-colors duration-300 min-w-[150px]">Save All Settings</button>
+            </div>
             
-            <div id="server-settings-list" style="max-height: 400px; overflow-y: auto; background: #222; border-radius: 5px; padding: 10px; margin-top: 10px;">
-                <p style="color: #fff; text-align: center;">Loading server settings...</p>
+            <div id="server-settings-list" class="max-h-[400px] overflow-y-auto bg-gray-800 rounded-lg p-2.5 mt-2.5">
+                <p class="text-white text-center">Loading server settings...</p>
             </div>
         </div>
-        <div style="text-align:center;">
-            <button class="buttonlink" type="submit" id="cotton_state_toggle" value="awaken" cotton-state="torun">awaken</button>
+        <div class="text-center">
+            <button class="w-4/5 sm:w-3/5 md:w-2/5 min-w-[200px] mx-auto mb-0.5 bg-cotton-orange border-none rounded-lg py-2.5 px-5 text-center font-sans font-bold text-base text-cotton-dark cursor-pointer hover:bg-orange-200 transition-colors duration-300" type="submit" id="cotton_state_toggle" value="awaken" cotton-state="torun">awaken</button>
         </div>
     </form>
 
-    <div id="status-indicator">Status: asleep</div>
+    <div id="status-indicator" class="text-center text-cotton-orange font-sans font-bold my-5 mx-auto w-[90%] max-w-[1200px]">Status: 💤 Asleep</div>
 
-    <hr id="console-divider">
-    <div id="console-log-panel">
-        <div id="console-log-header">
+    <hr id="console-divider" class="border-2 border-cotton-orange m-0 w-full fixed bottom-[250px] left-0 z-[100]">
+    <div id="console-log-panel" class="fixed bottom-0 left-0 right-0 w-full max-w-full bg-cotton-bg rounded-none shadow-[0_-2px_10px_rgba(0,0,0,0.5)] z-[100]">
+        <div id="console-log-header" class="bg-cotton-orange text-cotton-dark py-2 px-4 rounded-none font-bold text-center font-sans border-t-2 border-cotton-orange">
             Console Log
         </div>
-        <div id="console-log">
+        <div id="console-log" class="bg-cotton-bg text-left text-green-500 font-mono p-4 h-[200px] overflow-y-auto rounded-none">
             [System] Awaiting command...
         </div>
     </div>
@@ -155,12 +170,12 @@
 
             async function loadServerSettings() {
                 try {
-                    serverSettingsList.innerHTML = "<p style='color: #fff; text-align: center;'>Loading server settings...</p>";
+                    serverSettingsList.innerHTML = "<p class='text-white text-center'>Loading server settings...</p>";
                     const res = await fetch("/api/server-settings");
                     const data = await res.json();
                     
                     if (data.status === "error") {
-                        serverSettingsList.innerHTML = `<p style='color: #f00; text-align: center;'>${data.message}</p>`;
+                        serverSettingsList.innerHTML = `<p class='text-red-500 text-center'>${data.message}</p>`;
                         return;
                     }
 
@@ -168,13 +183,13 @@
                     renderServerSettings();
                 } catch (err) {
                     console.error("Failed to load server settings:", err);
-                    serverSettingsList.innerHTML = `<p style='color: #f00; text-align: center;'>Error loading settings: ${err.message}</p>`;
+                    serverSettingsList.innerHTML = `<p class='text-red-500 text-center'>Error loading settings: ${err.message}</p>`;
                 }
             }
 
             function renderServerSettings() {
                 if (Object.keys(serverSettings).length === 0) {
-                    serverSettingsList.innerHTML = "<p style='color: #fff; text-align: center;'>No server settings configured. Add a server ID above.</p>";
+                    serverSettingsList.innerHTML = "<p class='text-white text-center'>No server settings configured. Add a server ID above.</p>";
                     return;
                 }
 
@@ -183,18 +198,18 @@
                     const ttsEnabled = settings.tts_enabled !== undefined ? settings.tts_enabled : true;
                     const modderEnabled = settings.modder_enabled !== undefined ? settings.modder_enabled : true;
                     
-                    html += `<div class="server-setting-item" style="background: #343638; padding: 10px; margin-bottom: 10px; border-radius: 3px;">`;
-                    html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">`;
-                    html += `<strong style="color: #fff;">Server ID: ${serverId}</strong>`;
-                    html += `<button type="button" class="remove-server-btn" data-server-id="${serverId}" style="background: #f00; color: #fff; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">Remove</button>`;
+                    html += `<div class="server-setting-item bg-cotton-dark p-2.5 mb-2.5 rounded">`;
+                    html += `<div class="flex justify-between items-center mb-2.5">`;
+                    html += `<strong class="text-white">Server ID: ${serverId}</strong>`;
+                    html += `<button type="button" class="remove-server-btn bg-red-600 text-white border-none py-1.5 px-2.5 rounded cursor-pointer hover:bg-red-700 transition-colors" data-server-id="${serverId}">Remove</button>`;
                     html += `</div>`;
-                    html += `<div class="form-row" style="margin-bottom: 5px;">`;
-                    html += `<div class="form-label" style="color: #fff; width: 50%;">TTS Enabled</div>`;
-                    html += `<input type="checkbox" class="server-tts-checkbox" data-server-id="${serverId}" ${ttsEnabled ? "checked" : ""} style="margin-left: 10px;">`;
+                    html += `<div class="flex items-center justify-center gap-4 w-full mb-1.5">`;
+                    html += `<div class="w-full text-left font-sans text-xs font-bold text-white">TTS Enabled</div>`;
+                    html += `<input type="checkbox" class="server-tts-checkbox ml-2.5" data-server-id="${serverId}" ${ttsEnabled ? "checked" : ""}>`;
                     html += `</div>`;
-                    html += `<div class="form-row">`;
-                    html += `<div class="form-label" style="color: #fff; width: 50%;">Moderation Enabled</div>`;
-                    html += `<input type="checkbox" class="server-modder-checkbox" data-server-id="${serverId}" ${modderEnabled ? "checked" : ""} style="margin-left: 10px;">`;
+                    html += `<div class="flex items-center justify-center gap-4 w-full">`;
+                    html += `<div class="w-full text-left font-sans text-xs font-bold text-white">Moderation Enabled</div>`;
+                    html += `<input type="checkbox" class="server-modder-checkbox ml-2.5" data-server-id="${serverId}" ${modderEnabled ? "checked" : ""}>`;
                     html += `</div>`;
                     html += `</div>`;
                 }

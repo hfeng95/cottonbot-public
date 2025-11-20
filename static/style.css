@@ -203,7 +203,7 @@ input::placeholder {
 }
 
 .form-label {
-    width: 50%;
+    width: 100%;
     margin: auto;
     text-align: left;
     font-family: Helvetica;
@@ -212,7 +212,7 @@ input::placeholder {
 }
 
 .form-row select {
-    width: 50%;
+    width: 80%;
   padding: 0.3em 0.5em;
   border-radius: 5px;
   border: 1px solid #555;

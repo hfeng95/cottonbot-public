@@ -79,12 +79,8 @@ class CottonMemory:
             self.conversation_summary = ''
 
         # Load or initialize FAISS vector memory
-        faiss_path = os.path.join(memory_dir, "long_term.faiss")
-        if os.path.exists(faiss_path):
-            self.vectorstore = FAISS.load_local(
-                faiss_path, self.embeddings, allow_dangerous_deserialization=True
-            )
-        else:
+        faiss_found = self.load()
+        if not faiss_found:
             self.vectorstore = FAISS.from_texts(["cottonbot awakens anew."], self.embeddings)
 
         # Memory layers
@@ -97,6 +93,18 @@ class CottonMemory:
             path = self.memory_dir
         os.makedirs(path, exist_ok=True)
         self.vectorstore.save_local(os.path.join(path, "long_term.faiss"))
+    
+    def load(self,path=None):
+        """Load long term FAISS memory from disk."""
+        if path==None:
+            path = self.memory_dir
+        faiss_path = os.path.join(path, "long_term.faiss")
+        if os.path.exists(faiss_path):
+            self.vectorstore = FAISS.load_local(
+                faiss_path, self.embeddings, allow_dangerous_deserialization=True
+            )
+            return True
+        return False
 
     def save_context(self, user_input, bot_output, user_name='User',bot_name='cottonbot',num_rounds=3):
         """Store new chat turns."""
@@ -108,6 +116,10 @@ class CottonMemory:
             print('Summary:',self.conversation_summary)
         else:
             self.summary.save_context({"input": user_input}, {"output": bot_output})
+        
+        # Add conversation to vectorstore for long-term memory
+        conversation_text = f"{user_name}: {user_input}\n{bot_name}: {bot_output}"
+        self.vectorstore.add_texts([conversation_text])
 
     def get_context(self):
         """Retrieve memory context for prompting."""
@@ -131,7 +143,7 @@ class CottonMemory:
                 pairs.append(f"{user_name}: {user_msg}\n{bot_name}: {bot_msg}")
         return pairs
 
-    def reflect(self):
+    async def reflect(self):
         """Generate reflective summaries to improve future recall."""
         prompt = f"""
             Review your memory and summarize any new facts, relationships, or ideas that may be useful later.
